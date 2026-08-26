@@ -6,3 +6,5 @@ out/
 .env.*
 !.env.example
 .superpowers/
+.claude/
+.tokensave/
