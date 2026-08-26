@@ -39,6 +39,10 @@ async function createTools(webContents) {
 
   // ref -> backendDOMNodeId. snapshot() 마다 통째로 새로 만든다.
   let refs = new Map();
+  // ref 라벨 카운터. snapshot() 마다 0으로 리셋하면 이전 스냅샷의 라벨(예: e1)이
+  // 새 문서에서도 그대로 재발급되어, 오래된 ref를 쥔 호출자가 완전히 다른(하지만
+  // 우연히 라벨이 같은) 요소를 조작하게 된다. 도구 수명 동안 절대 리셋하지 않는다.
+  let n = 0;
 
   async function resolve(ref) {
     const backendNodeId = refs.get(ref);
@@ -68,7 +72,6 @@ async function createTools(webContents) {
     const { nodes } = await cdp('Accessibility.getFullAXTree');
     refs = new Map();
     const lines = [];
-    let n = 0;
 
     for (const node of nodes) {
       if (node.ignored) continue;
@@ -78,11 +81,17 @@ async function createTools(webContents) {
 
       if (INTERACTIVE.has(role)) {
         if (node.backendDOMNodeId === undefined) continue;
-        // 이름 없는 상호작용 노드는 에이전트가 지목할 수 없으므로 버린다
-        if (!name) continue;
         const ref = 'e' + ++n;
         refs.set(ref, node.backendDOMNodeId);
-        lines.push(`[ref=${ref}] ${role} ${JSON.stringify(name)}`);
+        // 이름 없는 상호작용 노드(아이콘 전용 버튼 등)도 버리지 않는다 — description
+        // 으로 대체하고, 그마저 없으면 (unlabeled)로 표시해서 최소한 존재는 드러낸다.
+        const description = (node.description?.value ?? '').trim();
+        const label = name
+          ? JSON.stringify(name)
+          : description
+            ? JSON.stringify(description)
+            : '(unlabeled)';
+        lines.push(`[ref=${ref}] ${role} ${label}`);
       } else if (LANDMARK.has(role) && name) {
         lines.push(`          ${role} ${JSON.stringify(name)}`);
       }
@@ -127,7 +136,25 @@ async function createTools(webContents) {
     return `waited ${ms / 1000}s`;
   }
 
-  return { navigate, snapshot, click, type, readPage, wait };
+  // 여섯 도구 모두 "사람이 읽을 수 있는 문자열"을 반환하는 게 계약이다. 실패해도
+  // reject 하면 MCP 핸들러가 모델에게 프로토콜 에러를 던지게 되므로, 여기 한
+  // 곳에서만 잡아서 문자열로 바꾼다 (각 함수 내부에 개별 try/catch 두지 않는다).
+  const safe = (name, fn) => async (...args) => {
+    try {
+      return await fn(...args);
+    } catch (e) {
+      return `${name} failed: ${e.message}`;
+    }
+  };
+
+  return {
+    navigate: safe('navigate', navigate),
+    snapshot: safe('snapshot', snapshot),
+    click: safe('click', click),
+    type: safe('type', type),
+    readPage: safe('readPage', readPage),
+    wait: safe('wait', wait),
+  };
 }
 
 module.exports = { createTools };

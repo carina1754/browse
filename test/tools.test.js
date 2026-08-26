@@ -18,6 +18,25 @@ const PAGE = `
 
 const FIXTURE_URL = 'data:text/html;charset=utf-8,' + encodeURIComponent(PAGE);
 
+// Second fixture, same shape (input then button) as PAGE so that under the
+// buggy (counter-resets-per-snapshot) code, its button gets assigned the
+// exact same ref label as PAGE's "Run Search" button. Also carries an
+// icon-only button with no aria-label, for the unlabeled-node fix.
+const PAGE_B = `
+<!doctype html><meta charset="utf-8"><title>fixture b</title>
+<h1>Fixture B Page</h1>
+<input id="qb" aria-label="other search box" />
+<button id="goB">Other Button</button>
+<button id="iconB"><svg width="10" height="10"></svg></button>
+<div id="out">idle-b</div>
+<script>
+  document.getElementById('goB').addEventListener('click', () => {
+    document.getElementById('out').textContent = 'B_CLICKED';
+  });
+</script>`;
+
+const FIXTURE_URL_B = 'data:text/html;charset=utf-8,' + encodeURIComponent(PAGE_B);
+
 async function main() {
   const win = new BrowserWindow({ show: false, width: 1000, height: 800 });
   const { createTools } = require('../main/tools.js');
@@ -43,6 +62,46 @@ async function main() {
 
   const stale = await tools.click('e9999');
   assert.match(stale, /stale ref/i, `expected stale-ref message, got: ${stale}`);
+
+  // --- Fix 1 (Critical): ref labels must not be reused across snapshots ---
+  // btn[1] is fixture A's "Run Search" ref, captured above, still valid
+  // (page A is still loaded, nothing has navigated away yet).
+  const oldRef = btn[1];
+
+  await tools.navigate(FIXTURE_URL_B);
+  const snapB = await tools.snapshot();
+  console.log('--- snapshot B ---\n' + snapB + '\n---------------');
+
+  const btnB = snapB.match(/\[ref=(\w+)\][^\n]*button[^\n]*Other Button/i);
+  assert.ok(btnB, `snapshot B did not expose "Other Button" with a ref:\n${snapB}`);
+  assert.notStrictEqual(
+    btnB[1], oldRef,
+    `ref label reused across snapshots: fixture B assigned ${btnB[1]} to its own ` +
+    `button, the same label fixture A's stale ref (${oldRef}) still points to`
+  );
+
+  // Fix 3: the icon-only button (no aria-label) must still show up, as
+  // "(unlabeled)", with its own ref — not silently dropped.
+  const iconRef = snapB.match(/\[ref=(\w+)\]\s*button\s*\(unlabeled\)/);
+  assert.ok(iconRef, `icon-only button missing from snapshot:\n${snapB}`);
+
+  // Using fixture A's old ref on fixture B must be treated as stale, not
+  // silently resolved to whatever live element on B now happens to share
+  // that label.
+  const reusedClick = await tools.click(oldRef);
+  assert.match(
+    reusedClick, /stale ref/i,
+    `stale ref from a previous snapshot resolved to a live element on the new page: ${reusedClick}`
+  );
+
+  const textB = await tools.readPage();
+  assert.ok(!textB.includes('B_CLICKED'), `stale ref click mutated fixture B:\n${textB}`);
+  assert.ok(textB.includes('idle-b'), `fixture B output div missing expected idle state:\n${textB}`);
+
+  // --- Fix 2: every tool returns a string, never rejects, even on bad input ---
+  const badNav = await tools.navigate('not-a-valid-url-at-all');
+  assert.strictEqual(typeof badNav, 'string', 'navigate() must resolve to a string even on a bad URL');
+  assert.match(badNav, /fail/i, `expected a failure message from navigate(), got: ${badNav}`);
 
   console.log('TOOLS PASS');
   app.exit(0);
