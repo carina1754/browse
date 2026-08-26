@@ -32,9 +32,13 @@ function buildArgs({ mcpUrl, model, systemPrompt }) {
   return args;
 }
 
-function createAgent({ cwd, mcpUrl, model, systemPrompt, onEvent }) {
+function createAgent({ cwd, mcpUrl, model, systemPrompt, env, onEvent }) {
+  // env 를 안 넘기면 node 가 process.env 를 물려준다. 넘기는 쪽(main/modes.js)은
+  // 그 상속을 의도적으로 덮어쓰려는 경우다 — headroom 을 껐을 때 셸에 남아 있는
+  // ANTHROPIC_BASE_URL 을 지우는 것 같은.
   const child = spawn(CLAUDE_BIN, buildArgs({ mcpUrl, model, systemPrompt }), {
     cwd,
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
