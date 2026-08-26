@@ -101,14 +101,49 @@ async function createTools(webContents) {
     return `${webContents.getURL()}\n${lines.join('\n')}`;
   }
 
-  // ponytail: el.click() 은 JS 클릭이다. 진짜 마우스 이벤트만 받는
-  // 캔버스/드래그 UI 는 못 뚫는다. 막히면 DOM.getBoxModel +
-  // Input.dispatchMouseEvent 좌표 경로를 추가한다.
+  // 요소의 화면 좌표 한 점을 고른다. 뷰포트 안으로 스크롤한 뒤 사각형을 다시 읽는다 —
+  // 스크롤 전 좌표로 클릭하면 엉뚱한 자리를 누른다. 화면 밖이거나 크기가 0 이면 null.
+  async function clickPoint(objectId) {
+    await callOn(objectId, 'function(){ this.scrollIntoView({block:"center", inline:"center"}); }');
+    let quad;
+    try {
+      ({ model: { content: quad } } = await cdp('DOM.getBoxModel', { objectId }));
+    } catch {
+      return null; // 렌더링되지 않는 요소는 박스가 없다
+    }
+    // content quad 는 [x1,y1, x2,y2, x3,y3, x4,y4] 순서다. 네 점의 평균이 중심.
+    const x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
+    const y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
+    // 뷰포트는 창이 아니라 이 webContents 에게 물어본다. 실제 앱에서 페이지는
+    // 창보다 작은 뷰에 들어가 있어서 창 크기로 재면 판정이 어긋난다.
+    const { result } = await cdp('Runtime.evaluate', {
+      expression: '({w: innerWidth, h: innerHeight})',
+      returnByValue: true,
+    });
+    const { w, h } = result.value ?? {};
+    if (x <= 0 || y <= 0 || (w && x >= w) || (h && y >= h)) return null;
+    return { x, y };
+  }
+
+  // 진짜 마우스 이벤트를 먼저 쏜다. 캔버스/드래그 UI 는 mousedown/mouseup 만 보고
+  // el.click() 이 만드는 합성 click 이벤트는 무시한다. 좌표를 못 구하는 요소
+  // (화면 밖, 크기 0, 렌더링 안 됨) 만 JS 클릭으로 떨어진다.
   async function click(ref) {
     const objectId = await resolve(ref);
     if (!objectId) return `stale ref ${ref} — call snapshot again`;
-    await callOn(objectId, 'function(){ this.scrollIntoView({block:"center"}); this.click(); }');
-    return `clicked ${ref}`;
+
+    const pt = await clickPoint(objectId);
+    if (!pt) {
+      await callOn(objectId, 'function(){ this.click(); }');
+      return `clicked ${ref} (JS 클릭 — 좌표를 못 구했다)`;
+    }
+
+    const base = { ...pt, button: 'left', buttons: 1, clickCount: 1 };
+    // 이동을 먼저 보낸다. hover 로만 열리는 메뉴는 이게 없으면 눌러도 안 열린다.
+    await cdp('Input.dispatchMouseEvent', { ...base, type: 'mouseMoved', buttons: 0 });
+    await cdp('Input.dispatchMouseEvent', { ...base, type: 'mousePressed' });
+    await cdp('Input.dispatchMouseEvent', { ...base, type: 'mouseReleased', buttons: 0 });
+    return `clicked ${ref} at ${Math.round(pt.x)},${Math.round(pt.y)}`;
   }
 
   async function type(ref, text) {

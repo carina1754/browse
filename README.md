@@ -277,8 +277,8 @@ npm test            # 유료 API 호출 포함 (agent + security)
   다른 플러그인은 설치 버튼이 그냥 실패한다.
 - `agent-cwd` 를 부팅 시 비우지 않는다 (확인 없는 파일 삭제라 일부러 안 했다).
 - chat.html 에 CSP meta 가 없다 (인라인 스크립트라 `unsafe-inline` 이 필요해짐).
-- `click()` 은 JS 클릭이다. 진짜 마우스 이벤트만 받는 캔버스/드래그 UI 는 못 뚫는다.
-  막히면 `DOM.getBoxModel` + `Input.dispatchMouseEvent` 좌표 경로를 추가한다.
+- `click()` 은 좌표를 못 구하는 요소(화면 밖, 크기 0, 렌더링 안 됨)에서만 JS 클릭으로
+  떨어진다. 그 경우 반환 문구에 `(JS 클릭 — 좌표를 못 구했다)` 가 붙는다.
 
 ## 작업 방식
 

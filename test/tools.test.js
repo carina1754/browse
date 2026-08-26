@@ -28,10 +28,16 @@ const PAGE_B = `
 <input id="qb" aria-label="other search box" />
 <button id="goB">Other Button</button>
 <button id="iconB"><svg width="10" height="10"></svg></button>
+<button id="rawB" aria-label="raw mouse button">Raw Mouse</button>
 <div id="out">idle-b</div>
+<div id="raw">no-raw</div>
 <script>
   document.getElementById('goB').addEventListener('click', () => {
     document.getElementById('out').textContent = 'B_CLICKED';
+  });
+  // el.click() 은 mousedown 을 만들지 않는다. 진짜 마우스 이벤트 경로만 여기 걸린다.
+  document.getElementById('rawB').addEventListener('mousedown', () => {
+    document.getElementById('raw').textContent = 'RAW_MOUSEDOWN';
   });
 </script>`;
 
@@ -97,6 +103,21 @@ async function main() {
   const textB = await tools.readPage();
   assert.ok(!textB.includes('B_CLICKED'), `stale ref click mutated fixture B:\n${textB}`);
   assert.ok(textB.includes('idle-b'), `fixture B output div missing expected idle state:\n${textB}`);
+
+  // --- click() 은 합성 click 이 아니라 진짜 마우스 이벤트를 쏴야 한다 ---
+  // 캔버스/드래그 UI 는 mousedown 만 본다. el.click() 으로는 절대 안 걸린다.
+  {
+    const rawSnap = await tools.snapshot();
+    const raw = rawSnap.match(/\[ref=(\w+)\][^\n]*button[^\n]*raw mouse button/i);
+    assert.ok(raw, `snapshot did not expose the raw-mouse button:\n${rawSnap}`);
+
+    const msg = await tools.click(raw[1]);
+    assert.match(msg, /at \d+,\d+/, `click() fell back to the JS path: ${msg}`);
+
+    await tools.wait(0.2);
+    const after = await tools.readPage();
+    assert.ok(after.includes('RAW_MOUSEDOWN'), `click() did not fire a real mousedown:\n${after}`);
+  }
 
   // --- Fix 2: every tool returns a string, never rejects, even on bad input ---
   const badNav = await tools.navigate('not-a-valid-url-at-all');
