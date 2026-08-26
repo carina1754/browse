@@ -136,6 +136,14 @@ function handleLine(line, onEvent) {
   }
 
   if (msg.type === 'result') {
+    // 사용량은 성공/실패와 무관하게 청구된다. 실패한 턴도 세어야 한다.
+    if (msg.usage || msg.total_cost_usd != null) {
+      onEvent({
+        type: 'usage',
+        usage: msg.usage ?? {},
+        cost: Number(msg.total_cost_usd) || 0,
+      });
+    }
     if (msg.is_error) onEvent({ type: 'error', text: String(msg.result ?? 'unknown error') });
     else onEvent({ type: 'done', result: String(msg.result ?? '') });
   }

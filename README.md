@@ -98,6 +98,7 @@ main/tools.js    CDP 브라우저 도구 6개. MCP 도 Electron 창 구조도 �
 main/mcp.js      도구 6개를 MCP 툴로 등록하고 localhost HTTP 로 노출. CDP 를 모른다.
 main/deps.js     외부 도구 4개 점검·설치. electron 을 require 하지 않는다.
 main/modes.js    토큰 절약 모드. 시스템 프롬프트 조립 + 자식 env 조립. electron 을 require 하지 않는다.
+main/account.js  붙어 있는 계정(claude auth status)과 구독 한도 잔여량. electron 을 require 하지 않는다.
 main/workspace.js 에이전트 작업 디렉터리 비우기. 경로 안전장치 포함. electron 을 require 하지 않는다.
 main/preload.js  contextBridge 로 window.api 노출.
 renderer/chat.html  채팅 UI 전부 (인라인 스크립트). innerHTML 을 쓰지 않는다 — 전부 textContent.
@@ -205,6 +206,7 @@ npm test            # 유료 API 호출 포함 (agent + security)
 |---|---|---|
 | `test:deps` | 무료 | `checkAll()` 모양, 이미 깔린 것에 `install()` 이 단축 경로로 빠지는지 |
 | `test:modes` | 무료 | 프롬프트 조립, env 조립(대소문자·프록시 계열·세션 변수), 설정 병합 |
+| `test:account` | 무료 | 계정/한도 파싱, 토큰을 못 찾거나 응답 모양이 바뀌었을 때의 실패 경로 |
 | `test:workspace` | 무료 | 작업 디렉터리 비우기: 경로 안전장치, 심볼릭 링크를 안 따라가는지 |
 | `test:shell` | 무료 | `electron` 필요. 창/뷰 구조 |
 | `test:tools` | 무료 | `electron` 필요. CDP 도구 6개를 실제 페이지에 |
@@ -273,6 +275,15 @@ npm test            # 유료 API 호출 포함 (agent + security)
 ## 알려진 구멍
 
 - 설치 경로가 end-to-end 로 검증된 적 없다 (이 머신에는 넷 다 이미 있었다).
+- **구독 한도 잔여량(5시간/주간)의 출처가 문서화된 경로가 아니다.** CLI 어디에도
+  안 나온다 — `claude auth status --json` 에도, `-p` 의 result 메시지에도 없다.
+  그래서 `main/account.js` 가 `~/.claude/.credentials.json` 의 액세스 토큰으로
+  `https://api.anthropic.com/api/oauth/usage` 를 직접 친다. 응답 모양이 바뀌면
+  잔여량 칸이 "한도 정보가 응답에 없다" 로 바뀔 뿐 앱은 안 죽지만, 그날부터
+  숫자는 안 나온다. 계정 표시(`claude auth status --json`)와 세션 누적
+  사용량(result 의 `usage`/`total_cost_usd`)은 이 경로와 무관하다.
+- 세션 누적 사용량은 result 메시지의 `usage` 를 턴마다 **더한다**. `total_cost_usd`
+  가 턴별이 아니라 세션 누계라면 이 숫자는 과대 집계된다. 실측으로 확인 못 했다.
 - **`.cmd` 해제가 진짜 `claude.cmd` 로는 검증된 적 없다.** 이 머신은 네이티브
   설치라 `claude.exe` 뿐이다. 해제 로직 자체는 합성 shim 4종과 이 머신의 실제
   shim 2개(`opencode.cmd` → `.exe` 타깃, `corepack.cmd` → `.js` 타깃)로 검증했지만,

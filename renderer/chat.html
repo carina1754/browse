@@ -15,6 +15,11 @@
   #head b { flex: 1; font-weight: 500; }
   #gear { cursor: pointer; background: none; border: 0; color: #888; font-size: 15px; padding: 2px 4px; }
   #gear:hover { color: #e0e0e0; }
+  /* 계정·잔여량 줄. 창이 380px 라 두 칸 모두 넘치면 말줄임으로 자른다 —
+     줄바꿈을 허용하면 헤더 높이가 변해서 아래 대화창이 튄다. */
+  #status { display: flex; gap: 8px; padding: 4px 10px; border-bottom: 1px solid #333; font-size: 11px; color: #777; white-space: nowrap; overflow: hidden; }
+  #acct { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  #usage { flex: 0 0 auto; }
   #panel { display: none; border-bottom: 1px solid #333; padding: 10px; font-size: 12px; max-height: 45%; overflow-y: auto; }
   #panel.open { display: block; }
   .row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
@@ -34,6 +39,7 @@
   #input:focus { outline: none; }
 </style>
 <div id="head"><b>AI Browser</b><span id="modes"></span><button id="gear" title="설정">⚙</button></div>
+<div id="status"><span id="acct">계정 확인 중…</span><span id="usage"></span></div>
 <div id="panel"></div>
 <div id="log"></div>
 <div id="bar"><input id="input" placeholder="무엇을 할까요?" autofocus /></div>
@@ -42,6 +48,8 @@
   const input = document.getElementById('input');
   const panel = document.getElementById('panel');
   const modesLabel = document.getElementById('modes');
+  const acctLabel = document.getElementById('acct');
+  const usageLabel = document.getElementById('usage');
   let streaming = null;
   let settings = null;
   let deps = [];
@@ -155,6 +163,55 @@
   // 설정값과 실제로 걸린 것이 달라진다.
   window.api.getSettings().then((s) => { settings = s; }).catch(() => {});
 
+  // --- 계정·사용량 -----------------------------------------------------------
+  // 한 줄에 두 가지를 같이 건다. 성격이 다르다.
+  //  - 구독 한도 잔여 %: 계정 전체 기준. main/account.js 가 읽어온다.
+  //  - 세션 누적: 이 창이 이번 에이전트로 태운 토큰과 비용. 에이전트가 다시 뜨면
+  //    대화가 초기화되므로 여기도 0 으로 되돌린다 ('modes' 가 재시작 신호다).
+  let session = { tokens: 0, cost: 0 };
+  let limits = [];
+
+  function short(n) {
+    if (n < 1000) return String(n);
+    if (n < 1000000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k';
+    return (n / 1000000).toFixed(1) + 'M';
+  }
+
+  function paintUsage() {
+    const parts = limits.map((l) => l.label + ' ' + l.remaining + '%');
+    if (session.tokens) {
+      parts.push('세션 ' + short(session.tokens) + ' · $' + session.cost.toFixed(session.cost >= 1 ? 2 : 3));
+    }
+    usageLabel.textContent = parts.join(' · ');
+  }
+
+  function addUsage(evt) {
+    const u = evt.usage || {};
+    // 캐시 읽기/쓰기도 토큰이다. 빼고 세면 실제로 태운 양보다 훨씬 작게 보인다.
+    session.tokens += (u.input_tokens || 0) + (u.output_tokens || 0)
+      + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+    session.cost += evt.cost || 0;
+    paintUsage();
+  }
+
+  async function refreshAccount() {
+    let res;
+    try {
+      res = await window.api.getAccount();
+    } catch {
+      return; // 헤더 한 줄이 비는 것뿐이다. 대화를 막지 않는다.
+    }
+    const a = res.auth || {};
+    let text = a.loggedIn
+      ? (a.email || '(이메일 없음)') + (a.plan ? ' · ' + a.plan : '')
+      : (a.error ? '계정: ' + a.error : '로그인 안 됨');
+    limits = (res.limits && res.limits.limits) || [];
+    if (!limits.length && res.limits && res.limits.error) text += ' · 잔여량: ' + res.limits.error;
+    acctLabel.textContent = text;
+    paintUsage();
+  }
+  refreshAccount();
+
   // --- 대화 -----------------------------------------------------------------
 
   input.addEventListener('keydown', (e) => {
@@ -172,11 +229,17 @@
       log.scrollTop = log.scrollHeight;
     } else if (evt.type === 'modes') {
       modesLabel.textContent = evt.modes.length ? evt.modes.join(' · ') : '';
+      // 에이전트가 새로 떴다 = 대화도 사용량도 처음부터다.
+      session = { tokens: 0, cost: 0 };
+      paintUsage();
     } else if (evt.type === 'tool') {
       streaming = null;
       line('tool', '· ' + evt.text);
+    } else if (evt.type === 'usage') {
+      addUsage(evt);
     } else if (evt.type === 'done') {
       streaming = null;
+      refreshAccount(); // 한도가 줄었을 수 있다. main 쪽에서 30초 캐시로 묶는다.
     } else if (evt.type === 'error') {
       streaming = null;
       line('err', '! ' + evt.text);

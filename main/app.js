@@ -11,6 +11,7 @@ const { startMcpServer } = require('./mcp.js');
 const { createAgent } = require('./claude.js');
 const { clearDir } = require('./workspace.js');
 const { checkAll, install, claudeBin } = require('./deps.js');
+const { authStatus, subscriptionUsage } = require('./account.js');
 const {
   loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled,
   isHeadroomUp, headroomUrl,
@@ -154,6 +155,22 @@ app.whenReady().then(async () => {
     // claude 가 방금 들어왔으면 이제 에이전트를 띄울 수 있다.
     if (res.ok && name === 'claude' && !agent) await startAgent();
     return res;
+  });
+
+  // 계정과 구독 한도. 렌더러는 턴이 끝날 때마다 물어보는데, 그때마다
+  // 프로세스를 띄우고 네트워크를 치면 낭비다. 30초 캐시로 묶는다.
+  let accountCache = null;
+  let accountAt = 0;
+  ipcMain.handle('account:get', async () => {
+    if (accountCache && Date.now() - accountAt < 30000) return accountCache;
+    const bin = await claudeBin();
+    const [auth, limits] = await Promise.all([
+      bin ? authStatus(bin) : { error: 'Claude Code 를 못 찾았다' },
+      subscriptionUsage(),
+    ]);
+    accountCache = { auth, limits };
+    accountAt = Date.now();
+    return accountCache;
   });
 
   ipcMain.handle('settings:get', () => settings);
