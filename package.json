@@ -10,7 +10,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
     "test:shell": "electron test/shell.test.js",
-    "test:agent": "node test/agent.test.js"
+    "test:agent": "node test/agent.test.js",
+    "test:tools": "electron test/tools.test.js"
   },
   "repository": {
     "type": "git",
