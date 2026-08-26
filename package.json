@@ -2,7 +2,7 @@
   "name": "ai-browser",
   "version": "0.1.0",
   "description": "",
-  "main": "main/index.js",
+  "main": "main/app.js",
   "directories": {
     "doc": "docs"
   },
