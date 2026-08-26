@@ -1,5 +1,12 @@
 <!doctype html>
 <meta charset="utf-8" />
+<!-- default-src 'none' 이 핵심이다. 이 창은 IPC 로만 말하고 원격 자원을 하나도 안 쓴다.
+     그래서 이미지/폰트/fetch/프레임이 전부 막혀서 유출 통로가 남지 않는다.
+     스크립트와 스타일은 이 파일 안에 인라인이라 'unsafe-inline' 이 필요하다. 대신
+     화면에 들어가는 에이전트 텍스트는 전부 textContent 로만 넣는다 (innerHTML 금지) —
+     그 규칙이 깨지면 이 정책으로는 못 막는다. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'" />
 <title>chat</title>
 <style>
   html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; }
