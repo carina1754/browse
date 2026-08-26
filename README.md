@@ -230,7 +230,7 @@ npm test            # 유료 API 호출 포함 (agent + security)
 5. **메뉴바가 `getContentBounds()` 에 안 보인다.** 메뉴바는 클라이언트 영역을 약
    21px 밀어내는데 `getContentBounds()` 는 밀리기 전 높이를 보고한다. 그 높이로 뷰를
    깔면 아래 21px 가 화면 밖으로 나가서 채팅 입력칸이 잘린다.
-   `Menu.setApplicationMenu(null)` 로 해결.
+   `Menu.setApplicationMenu(null)` 로 해결. 육안 확인함 (2026-08-26).
 6. **`Bash` 툴의 heredoc 이 역슬래시를 먹는다.** 따옴표 친 delimiter 인데도 역슬래시
    두 개가 하나로 접혔다 (3번 발생). 정규식이나 윈도우 경로를 heredoc 으로 쓰지 말 것.
    python 에서 `chr(92)` 로 조립하는 게 확실하다. 이 README 자체도 heredoc 으로 쓰다가
@@ -260,8 +260,6 @@ npm test            # 유료 API 호출 포함 (agent + security)
   spawn 이 ENOENT 로 죽는다. 다른 머신으로 옮길 때 **가장 먼저 확인할 것**.
   고치려면 `claudeBin()` 결과를 `createAgent` 로 넘기면 된다.
 - 설치 경로가 end-to-end 로 검증된 적 없다 (이 머신에는 넷 다 이미 있었다).
-- 채팅 입력칸 잘림 수정이 **눈으로 확인된 적 없다.** `getContentBounds()` 가
-  메뉴바를 모르므로 측정으로는 검증이 안 된다. `npm start` 로 직접 봐야 한다.
 - `findPlugin` 은 마켓플레이스 이름과 플러그인 이름이 같다고 가정한다.
 - `claude plugin install` 이 실패해도 성공으로 보고될 수 있다 (마켓플레이스 clone
   자체에 `SKILL.md` 가 있어서 실질적으로는 무해).
