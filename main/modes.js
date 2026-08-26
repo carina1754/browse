@@ -6,7 +6,7 @@
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
-const { findPlugin } = require('./deps.js');
+const { findSkill } = require('./deps.js');
 
 const HEADROOM_DEFAULT_PORT = 8787;
 
@@ -29,41 +29,6 @@ const DEFAULTS = {
   tokenSaver: false,
   modes: { headroom: false, caveman: false, ponytail: false },
 };
-
-// 플러그인 안에서 skills/<이름>/SKILL.md 를 찾는다. 플러그인은 버전/해시 디렉터리를
-// 한 겹 더 두고, 같은 파일을 plugins/<이름>/skills/ 나 .openclaw/skills/ 에도
-// 복제해둔다. 가장 짧은 경로가 정본이다.
-function findSkill(name) {
-  const root = findPlugin(name);
-  if (!root) return null;
-
-  const hits = [];
-  (function walk(dir, depth) {
-    if (depth > 5) return;
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const p = path.join(dir, e.name);
-      if (e.name === 'skills') {
-        const skill = path.join(p, name, 'SKILL.md');
-        if (fs.existsSync(skill)) hits.push(skill);
-        continue; // skills 아래로는 더 내려가지 않는다
-      }
-      walk(p, depth + 1);
-    }
-  })(root, 0);
-
-  // 문자 길이로 정렬하면 6.9.0 이 6.10.0 을 이긴다. 경로 깊이가 먼저고,
-  // 같은 깊이면 사전순 역순으로 최신 버전 디렉터리를 집는다.
-  const depth = (p) => p.split(path.sep).length;
-  hits.sort((a, b) => depth(a) - depth(b) || b.localeCompare(a));
-  return hits[0] ?? null;
-}
 
 function loadModeText(name) {
   const file = findSkill(name);

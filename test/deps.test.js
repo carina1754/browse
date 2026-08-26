@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { checkAll, install, findPlugin, DEPS, unwrapCmdShim, toSpawnable } = require('../main/deps.js');
+const { checkAll, install, findSkill, DEPS, unwrapCmdShim, toSpawnable } = require('../main/deps.js');
 
 // npm -g 로 깔린 claude.cmd 를 실행 가능한 형태로 푸는 부분.
 // .cmd 는 shell 없이는 EINVAL 이고, shell 을 켜면 경로 공백·인자 이스케이프·8191자
@@ -143,8 +143,13 @@ async function main() {
   const bogus = await install('nope-not-a-dep');
   assert.strictEqual(bogus.ok, false, '없는 의존성 이름이 성공으로 보고됐다');
 
-  // 6. findPlugin 은 없는 플러그인에 null 을 준다
-  assert.strictEqual(findPlugin('definitely-not-installed-xyz'), null);
+  // 6. findSkill 은 없는 플러그인에 null 을 주고, 있는 건 실제 SKILL.md 를 준다
+  assert.strictEqual(findSkill('definitely-not-installed-xyz'), null);
+  for (const name of ['caveman', 'ponytail']) {
+    const hit = findSkill(name);
+    // 이 머신에 안 깔려 있을 수 있다. 깔려 있다면 디렉터리가 아니라 파일이어야 한다.
+    if (hit) assert.ok(hit.endsWith(`${path.sep}SKILL.md`) && fs.existsSync(hit), `${name}: findSkill 이 SKILL.md 가 아닌 걸 줬다`);
+  }
 
   // 7. 모든 DEPS 항목에 check 와 install 이 있어야 한다
   for (const [name, d] of Object.entries(DEPS)) {

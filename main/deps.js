@@ -167,11 +167,44 @@ async function claudeBin() {
   return null;
 }
 
-// 플러그인은 실행파일이 아니라 디스크의 마크다운이다. 있으면 그 경로를 돌려준다.
-function findPlugin(name) {
+// 플러그인은 실행파일이 아니라 디스크의 마크다운이다. 마켓플레이스 디렉터리 이름이
+// 플러그인 이름과 같다고 가정하지 않는다 (caveman 은 같지만 규칙이 아니다) — 루트들의
+// 하위를 훑어 skills/<이름>/SKILL.md 를 직접 찾는다. 프롬프트에 실제로 붙는 그 파일이
+// 곧 설치 판정이다. 디렉터리만 보고 판정하면 UI 는 "설치됨"인데 모드는 조용히 빠진다.
+// 플러그인은 버전/해시 디렉터리를 한 겹 더 두고, 같은 파일을 plugins/<이름>/skills/ 나
+// .openclaw/skills/ 에도 복제해둔다. 가장 짧은 경로가 정본이다.
+function findSkill(name) {
+  let hits = [];
+  const walk = (dir, depth) => {
+    if (depth > 6) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const p = path.join(dir, e.name);
+      if (e.name === 'skills') {
+        const skill = path.join(p, name, 'SKILL.md');
+        if (fs.existsSync(skill)) hits.push(skill);
+        continue; // skills 아래로는 더 내려가지 않는다
+      }
+      walk(p, depth + 1);
+    }
+  };
+  // 루트 순서가 우선이다 (cache = 정식 설치본, marketplaces = clone 원본).
+  // 깊이로만 고르면 얕은 clone 이 항상 정식 설치본을 이긴다.
   for (const root of PLUGIN_ROOTS) {
-    const dir = path.join(root, name);
-    if (fs.existsSync(dir)) return dir;
+    hits = [];
+    walk(root, 0);
+    if (!hits.length) continue;
+    // 문자 길이로 정렬하면 6.9.0 이 6.10.0 을 이긴다. 경로 깊이가 먼저고,
+    // 같은 깊이면 사전순 역순으로 최신 버전 디렉터리를 집는다.
+    const depth = (p) => p.split(path.sep).length;
+    hits.sort((a, b) => depth(a) - depth(b) || b.localeCompare(a));
+    return hits[0];
   }
   return null;
 }
@@ -210,8 +243,8 @@ const DEPS = {
     required: false,
     why: '에이전트 답변에서 군더더기를 뺀다. 출력 토큰이 줄어든다.',
     check: async () => {
-      const dir = findPlugin('caveman');
-      return dir ? { ok: true, detail: dir } : { ok: false, detail: '플러그인 없음' };
+      const skill = findSkill('caveman');
+      return skill ? { ok: true, detail: skill } : { ok: false, detail: 'SKILL.md 없음' };
     },
     install: (onOutput) => installPlugin('caveman', onOutput),
   },
@@ -221,8 +254,8 @@ const DEPS = {
     required: false,
     why: '되는 첫 방법에서 멈춘다. 페이지 과탐색과 툴 왕복이 줄어든다.',
     check: async () => {
-      const dir = findPlugin('ponytail');
-      return dir ? { ok: true, detail: dir } : { ok: false, detail: '플러그인 없음' };
+      const skill = findSkill('ponytail');
+      return skill ? { ok: true, detail: skill } : { ok: false, detail: 'SKILL.md 없음' };
     },
     install: (onOutput) => installPlugin('ponytail', onOutput),
   },
@@ -279,6 +312,6 @@ async function install(name, onOutput) {
 }
 
 module.exports = {
-  checkAll, install, findPlugin, claudeBin, refreshPath, DEPS, MARKETPLACES,
+  checkAll, install, findSkill, claudeBin, refreshPath, DEPS, MARKETPLACES,
   unwrapCmdShim, toSpawnable,
 };

@@ -272,9 +272,9 @@ npm test            # 유료 API 호출 포함 (agent + security)
   shim 2개(`opencode.cmd` → `.exe` 타깃, `corepack.cmd` → `.js` 타깃)로 검증했지만,
   풀어낸 `node cli.js` 가 실제로 claude 로 뜨는 건 npm-global 머신에서 확인해야 한다.
   `⚙` 점검에 `2.1.246 (Claude Code)  (node ...cli.js)` 처럼 실행 형태가 같이 나온다.
-- `findPlugin` 은 마켓플레이스 이름과 플러그인 이름이 같다고 가정한다.
-- `claude plugin install` 이 실패해도 성공으로 보고될 수 있다 (마켓플레이스 clone
-  자체에 `SKILL.md` 가 있어서 실질적으로는 무해).
+- `claude plugin install` 은 아직 `<이름>@<이름>` 으로 부른다. 설치 판정은 명령의
+  종료 코드가 아니라 `findSkill` 재점검이라 오탐은 없지만, 마켓플레이스 이름이
+  다른 플러그인은 설치 버튼이 그냥 실패한다.
 - `agent-cwd` 를 부팅 시 비우지 않는다 (확인 없는 파일 삭제라 일부러 안 했다).
 - chat.html 에 CSP meta 가 없다 (인라인 스크립트라 `unsafe-inline` 이 필요해짐).
 - `click()` 은 JS 클릭이다. 진짜 마우스 이벤트만 받는 캔버스/드래그 UI 는 못 뚫는다.
