@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { checkAll, install, findSkill, DEPS, unwrapCmdShim, toSpawnable } = require('../main/deps.js');
+const { checkAll, install, findSkill, findMarketplace, DEPS, unwrapCmdShim, toSpawnable } = require('../main/deps.js');
 
 // npm -g 로 깔린 claude.cmd 를 실행 가능한 형태로 푸는 부분.
 // .cmd 는 shell 없이는 EINVAL 이고, shell 을 켜면 경로 공백·인자 이스케이프·8191자
@@ -149,6 +149,29 @@ async function main() {
     const hit = findSkill(name);
     // 이 머신에 안 깔려 있을 수 있다. 깔려 있다면 디렉터리가 아니라 파일이어야 한다.
     if (hit) assert.ok(hit.endsWith(`${path.sep}SKILL.md`) && fs.existsSync(hit), `${name}: findSkill 이 SKILL.md 가 아닌 걸 줬다`);
+  }
+
+  // 6-1. plugin install 은 <플러그인>@<마켓플레이스> 다. 이름이 같다고 가정하면 안 된다.
+  {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mkt-'));
+    const put = (dir, json) => {
+      fs.mkdirSync(path.join(root, dir, '.claude-plugin'), { recursive: true });
+      fs.writeFileSync(path.join(root, dir, '.claude-plugin', 'marketplace.json'), JSON.stringify(json));
+    };
+    put('official-dir', { name: 'claude-plugins-official', plugins: [{ name: 'caveman' }, { name: 'solo' }] });
+    put('someones-fork', { name: 'caveman', plugins: [{ name: 'caveman' }] });
+    put('broken', { name: 'broken' }); // plugins 없음
+    fs.mkdirSync(path.join(root, 'not-a-marketplace'), { recursive: true });
+
+    // 플러그인만 담은 마켓플레이스의 이름이 디렉터리 이름과 달라도 찾아야 한다
+    assert.strictEqual(findMarketplace('solo', root), 'claude-plugins-official');
+    // 여러 곳에 있으면 이름이 같은 전용 저장소를 고른다
+    assert.strictEqual(findMarketplace('caveman', root), 'caveman');
+    // 없는 플러그인, 깨진 clone, 마켓플레이스 아닌 디렉터리는 조용히 null
+    assert.strictEqual(findMarketplace('definitely-not-a-plugin', root), null);
+    assert.strictEqual(findMarketplace('caveman', path.join(root, 'nope')), null);
+
+    fs.rmSync(root, { recursive: true, force: true });
   }
 
   // 7. 모든 DEPS 항목에 check 와 install 이 있어야 한다

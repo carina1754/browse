@@ -278,9 +278,6 @@ npm test            # 유료 API 호출 포함 (agent + security)
   shim 2개(`opencode.cmd` → `.exe` 타깃, `corepack.cmd` → `.js` 타깃)로 검증했지만,
   풀어낸 `node cli.js` 가 실제로 claude 로 뜨는 건 npm-global 머신에서 확인해야 한다.
   `⚙` 점검에 `2.1.246 (Claude Code)  (node ...cli.js)` 처럼 실행 형태가 같이 나온다.
-- `claude plugin install` 은 아직 `<이름>@<이름>` 으로 부른다. 설치 판정은 명령의
-  종료 코드가 아니라 `findSkill` 재점검이라 오탐은 없지만, 마켓플레이스 이름이
-  다른 플러그인은 설치 버튼이 그냥 실패한다.
 - chat.html 의 CSP 는 `default-src 'none'` 에 스크립트/스타일만 `'unsafe-inline'` 이다.
   인라인이라 어쩔 수 없다 — 그래서 화면에 넣는 에이전트 텍스트는 `textContent` 로만
   넣어야 한다. `innerHTML` 을 쓰는 순간 이 정책은 못 막는다.

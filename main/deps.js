@@ -38,9 +38,10 @@ const INSTALL_DIRS = [
 ];
 
 // 플러그인 마크다운이 놓이는 곳. cache 가 정식 설치본, marketplaces 는 clone 원본.
+const MARKETPLACE_ROOT = path.join(HOME, '.claude', 'plugins', 'marketplaces');
 const PLUGIN_ROOTS = [
   path.join(HOME, '.claude', 'plugins', 'cache'),
-  path.join(HOME, '.claude', 'plugins', 'marketplaces'),
+  MARKETPLACE_ROOT,
 ];
 
 // 공식 설치 경로. 이 상수들은 이 사용자 머신에 실제로 설치된 흔적에서 확인한 값이다
@@ -209,6 +210,33 @@ function findSkill(name) {
   return null;
 }
 
+// `claude plugin install` 은 <플러그인>@<마켓플레이스> 를 받는다. 둘이 같다는 보장이
+// 없어서(공식 마켓플레이스 하나에 플러그인이 수백 개 들어 있다) clone 된
+// marketplace.json 에서 실제 이름을 읽는다. 못 찾으면 이름이 같다고 보고 넘어간다 —
+// 설치 판정은 어차피 findSkill 재점검이라 틀려도 조용한 성공은 안 나온다.
+function findMarketplace(plugin, root = MARKETPLACE_ROOT) {
+  let dirs;
+  try {
+    dirs = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory());
+  } catch {
+    return null;
+  }
+  const hits = [];
+  for (const d of dirs) {
+    let json;
+    try {
+      json = JSON.parse(fs.readFileSync(path.join(root, d.name, '.claude-plugin', 'marketplace.json'), 'utf8'));
+    } catch {
+      continue; // 마켓플레이스가 아니거나 clone 이 깨졌다
+    }
+    if (!Array.isArray(json.plugins) || !json.plugins.some((p) => p?.name === plugin)) continue;
+    hits.push(json.name || d.name);
+  }
+  // 같은 플러그인을 여러 마켓플레이스가 담을 수 있다 (공식 디렉터리 + 원본 저장소).
+  // 우리가 add 한 전용 저장소는 이름이 플러그인과 같으므로 그쪽을 먼저 고른다.
+  return hits.find((n) => n === plugin) ?? hits[0] ?? null;
+}
+
 const DEPS = {
   claude: {
     label: 'Claude Code',
@@ -270,7 +298,9 @@ async function installPlugin(name, onOutput) {
   const added = await run(bin.command, [...bin.args, 'plugin', 'marketplace', 'add', url], onOutput);
   // 이미 등록돼 있으면 실패로 나오지만 그건 문제가 아니다 — 다음 단계가 판정한다.
   if (added.code !== 0 && onOutput) onOutput(`marketplace add 실패(무시하고 진행): ${added.out.trim()}`);
-  return run(bin.command, [...bin.args, 'plugin', 'install', `${name}@${name}`], onOutput);
+  const marketplace = findMarketplace(name) ?? name;
+  if (marketplace !== name && onOutput) onOutput(`마켓플레이스 이름: ${marketplace}`);
+  return run(bin.command, [...bin.args, 'plugin', 'install', `${name}@${marketplace}`], onOutput);
 }
 
 async function checkAll() {
@@ -312,6 +342,6 @@ async function install(name, onOutput) {
 }
 
 module.exports = {
-  checkAll, install, findSkill, claudeBin, refreshPath, DEPS, MARKETPLACES,
+  checkAll, install, findSkill, findMarketplace, claudeBin, refreshPath, DEPS, MARKETPLACES,
   unwrapCmdShim, toSpawnable,
 };
