@@ -18,6 +18,7 @@
   .why { color: #777; font-size: 11px; padding: 0 0 6px 40px; }
   .row button { background: #2f6f3f; border: 0; color: #fff; border-radius: 3px; padding: 3px 8px; font: inherit; cursor: pointer; }
   .row button[disabled] { background: #444; color: #888; cursor: default; }
+  .row button.ghost { background: #3a3a3a; }
   .warn { color: #b58900; font-size: 11px; padding-top: 8px; border-top: 1px solid #333; margin-top: 10px; }
   .err { color: #ff6b6b; font-size: 11px; padding-top: 6px; }
 </style>
@@ -26,6 +27,8 @@
   const panel = document.getElementById('panel');
   let settings = null;
   let deps = [];
+  let account = null;
+  let loginNote = '';
   let error = '';
 
   function el(tag, cls, text) {
@@ -35,9 +38,14 @@
     return n;
   }
 
-  async function apply(next) {
-    // 재시작이 도는 동안 또 토글하면 에이전트가 겹쳐 뜬다. 잠가둔다.
+  // 재시작/로그아웃이 도는 동안 또 누르면 에이전트가 겹쳐 뜬다. 잠가둔다.
+  // 어느 경로든 끝나면 render() 가 화면을 새로 그려서 같이 풀린다.
+  function lock() {
     panel.querySelectorAll('input, button').forEach((i) => { i.disabled = true; });
+  }
+
+  async function apply(next) {
+    lock();
     try {
       settings = await window.api.setSettings(next);
       error = '';
@@ -50,8 +58,10 @@
 
   function render() {
     panel.replaceChildren();
+    accountSection();
     if (!settings) {
-      panel.append(el('div', null, '불러오는 중…'));
+      // 여기서 error 를 안 찍으면 설정을 못 읽었을 때 "불러오는 중…" 으로 영원히 굳는다.
+      panel.append(el('div', error ? 'err' : 'why', error || '설정 불러오는 중…'));
       return;
     }
 
@@ -105,6 +115,87 @@
     if (error) panel.append(el('div', 'err', error));
   }
 
+  // --- 계정 -----------------------------------------------------------------
+
+  function button(text, cls, onclick) {
+    const b = el('button', cls, text);
+    b.onclick = onclick;
+    return b;
+  }
+
+  function accountSection() {
+    panel.append(el('h2', null, '계정'));
+    if (!account) {
+      panel.append(el('div', 'why', '읽는 중…'));
+      return;
+    }
+
+    const a = account.auth || {};
+    const row = el('div', 'row');
+    if (a.error) row.append(el('label', null, '계정을 못 읽었다: ' + a.error));
+    else if (!a.loggedIn) row.append(el('label', null, '로그인 안 됨'));
+    else row.append(el('label', null, [a.email, a.plan, a.org].filter(Boolean).join(' · ') || '로그인됨'));
+
+    if (a.loggedIn) row.append(button('로그아웃', 'ghost', doLogout));
+    else row.append(button('로그인', null, doLogin));
+    row.append(button('새로고침', 'ghost', () => refresh(true)));
+    panel.append(row);
+
+    // 구독 한도 잔여량. 못 읽으면 이유를 그대로 보여준다 — 빈 줄이면 사용자는
+    // 한도가 없는 건지 앱이 멈춘 건지 구분을 못 한다.
+    const lim = account.limits || {};
+    panel.append(el('div', 'why', lim.limits && lim.limits.length
+      ? lim.limits.map((l) => l.label + ' ' + l.remaining + '% 남음').join(' · ')
+      : '남은 사용량: ' + (lim.error || '알 수 없다')));
+
+    if (loginNote) panel.append(el('div', 'why', loginNote));
+  }
+
+  async function refresh(force) {
+    try {
+      account = await window.api.getAccount(force);
+    } catch (e) {
+      account = { auth: { error: e && e.message ? e.message : String(e) }, limits: {} };
+    }
+    render();
+  }
+
+  async function doLogout() {
+    lock();
+    const res = await window.api.logout().catch((e) => ({ ok: false, detail: e.message }));
+    loginNote = res.ok ? '로그아웃했다. 다시 로그인해야 에이전트가 돈다.' : '로그아웃 실패: ' + res.detail;
+    await refresh(true);
+  }
+
+  async function doLogin() {
+    lock();
+    const res = await window.api.login().catch((e) => ({ ok: false, detail: e.message }));
+    loginNote = res.detail;
+    await refresh(true);
+    if (res.ok) poll();
+  }
+
+  // 로그인은 별도 콘솔 창에서 끝난다 — 끝났다고 알려주는 신호가 없다.
+  // 잠깐 훑어보다가 로그인된 게 보이면 멈춘다.
+  let timer = null;
+  function poll() {
+    if (timer) clearInterval(timer);
+    let left = 24; // 5초 × 24 = 2분
+    timer = setInterval(async () => {
+      await refresh(true);
+      const on = account && account.auth && account.auth.loggedIn;
+      if (!on && --left > 0) return;
+      clearInterval(timer);
+      timer = null;
+      if (on) {
+        loginNote = '로그인됐다. 에이전트가 다시 떴다.';
+        render();
+      }
+    }, 5000);
+  }
+
+  // --- 도구 -----------------------------------------------------------------
+
   function installButton(dep) {
     const btn = el('button', null, '설치');
     btn.onclick = async () => {
@@ -131,6 +222,8 @@
       error = '설정을 못 읽었다: ' + (e && e.message ? e.message : e);
     }
     render();
+    // 계정은 프로세스를 띄우고 네트워크를 친다. 설정 화면을 먼저 그리고 뒤따라 채운다.
+    refresh(false);
   }
   load();
 </script>

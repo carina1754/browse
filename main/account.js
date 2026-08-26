@@ -23,30 +23,64 @@ const LABELS = {
   seven_day_sonnet: '주간 Sonnet',
 };
 
-// `claude auth status --json` 을 돌린다. 절대 reject 하지 않는다 —
+// claude 를 한 번 돌리고 {code, out} 을 돌려준다. 절대 reject 하지 않는다 —
 // "로그인이 안 돼 있다"는 정상적인 결과지 예외가 아니다.
-function authStatus(bin, timeoutMs = 10000) {
+function run(bin, args, timeoutMs) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(bin.command, [...bin.args, 'auth', 'status', '--json'], {
+      child = spawn(bin.command, [...bin.args, ...args], {
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: os.homedir(),
       });
     } catch (e) {
-      resolve({ error: `실행 실패: ${e.message}` });
+      resolve({ code: -1, out: `실행 실패: ${e.message}` });
       return;
     }
     let out = '';
-    child.stdout.on('data', (d) => { out += d.toString('utf8'); });
-    child.stderr.on('data', () => {});
+    const take = (d) => { out += d.toString('utf8'); };
+    child.stdout.on('data', take);
+    child.stderr.on('data', take);
     const timer = setTimeout(() => child.kill(), timeoutMs);
-    child.on('error', (e) => { clearTimeout(timer); resolve({ error: e.message }); });
-    child.on('close', () => {
-      clearTimeout(timer);
-      resolve(parseAuth(out));
-    });
+    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, out: e.message }); });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ code, out }); });
   });
+}
+
+async function authStatus(bin, timeoutMs = 10000) {
+  const { out } = await run(bin, ['auth', 'status', '--json'], timeoutMs);
+  return parseAuth(out);
+}
+
+// 로그아웃은 비대화형이라 그냥 돌리면 된다.
+async function logout(bin, timeoutMs = 20000) {
+  const { code, out } = await run(bin, ['auth', 'logout'], timeoutMs);
+  return code === 0
+    ? { ok: true, detail: out.trim().slice(-200) || '로그아웃했다' }
+    : { ok: false, detail: out.trim().slice(-200) || `종료 코드 ${code}` };
+}
+
+// 로그인은 대화형 TUI 다 — 브라우저를 열고 콘솔에서 코드를 받는다. Electron 은
+// GUI 프로세스라 자식에게 물려줄 콘솔이 없다(detached 로 띄워도 DETACHED_PROCESS
+// 라 콘솔이 아예 안 붙는다). 그래서 윈도우에서는 cmd 로 콘솔 창을 새로 띄우고
+// 거기서 돌린다. /k 로 창을 남겨서 실패해도 메시지를 볼 수 있게 한다.
+function openLogin(bin) {
+  if (process.platform !== 'win32') {
+    return { ok: false, detail: '터미널에서 직접 실행해라: claude auth login' };
+  }
+  const q = (s) => `"${s}"`;
+  const inner = `"${[q(bin.command), ...bin.args, 'auth', 'login', '--claudeai'].join(' ')}"`;
+  try {
+    const child = spawn('cmd.exe', ['/c', 'start', '""', 'cmd', '/s', '/k', inner], {
+      windowsVerbatimArguments: true, // 인용부호를 우리가 직접 잡는다
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+  } catch (e) {
+    return { ok: false, detail: `콘솔 창을 못 띄웠다: ${e.message}` };
+  }
+  return { ok: true, detail: '콘솔 창에서 로그인을 마쳐라. 끝나면 여기서 새로고침된다.' };
 }
 
 function parseAuth(out) {
@@ -141,4 +175,4 @@ async function subscriptionUsage(fetchImpl = fetch, file = CREDENTIALS) {
   return { limits };
 }
 
-module.exports = { authStatus, subscriptionUsage, parseAuth, parseLimits, readToken, USAGE_URL };
+module.exports = { authStatus, logout, openLogin, subscriptionUsage, parseAuth, parseLimits, readToken, USAGE_URL };

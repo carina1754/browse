@@ -18,13 +18,10 @@
   #bar { display: flex; border-top: 1px solid #333; }
   #input { flex: 1; padding: 10px; border: 0; background: #2a2a2a; color: inherit; font: inherit; }
   #input:focus { outline: none; }
-  /* 맨 아래 한 줄에 계정·모드·잔여량·설정을 몰아넣는다. 창이 380px 라 넘칠 수밖에
-     없어서 계정 칸만 줄어들며 말줄임으로 잘린다. 줄바꿈은 막는다 — 바 높이가
-     바뀌면 위 대화창이 튄다. */
+  /* 맨 아래 한 줄에는 이번 세션이 태운 양만 둔다. 계정과 한도는 설정 창에 있다.
+     줄바꿈은 막는다 — 바 높이가 바뀌면 위 대화창이 튄다. */
   #status { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-top: 1px solid #333; font-size: 11px; color: #777; white-space: nowrap; overflow: hidden; }
-  #acct { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  #modes, #usage { flex: 0 0 auto; }
-  #modes { color: #b58900; }
+  #usage { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   #gear { flex: 0 0 auto; cursor: pointer; background: none; border: 0; color: #888; font-size: 13px; padding: 0 2px; }
   #gear:hover { color: #e0e0e0; }
 </style>
@@ -32,15 +29,11 @@
 <div id="bar"><input id="input" placeholder="무엇을 할까요?" autofocus /></div>
 <div id="status">
   <button id="gear" title="설정">⚙</button>
-  <span id="acct">계정 확인 중…</span>
-  <span id="modes"></span>
   <span id="usage"></span>
 </div>
 <script>
   const log = document.getElementById('log');
   const input = document.getElementById('input');
-  const modesLabel = document.getElementById('modes');
-  const acctLabel = document.getElementById('acct');
   const usageLabel = document.getElementById('usage');
   let streaming = null;
 
@@ -59,13 +52,11 @@
     window.api.openSettings().catch((e) => line('err', '! 설정 창을 못 열었다: ' + (e && e.message ? e.message : e)));
   };
 
-  // --- 계정·사용량 -----------------------------------------------------------
-  // 한 줄에 두 가지를 같이 건다. 성격이 다르다.
-  //  - 구독 한도 잔여 %: 계정 전체 기준. main/account.js 가 읽어온다.
-  //  - 세션 누적: 이 창이 이번 에이전트로 태운 토큰과 비용. 에이전트가 다시 뜨면
-  //    대화가 초기화되므로 여기도 0 으로 되돌린다 ('modes' 가 재시작 신호다).
+  // --- 사용량 ------------------------------------------------------------
+  // 이번 에이전트로 태운 토큰과 비용. 에이전트가 다시 뜨면 대화가 초기화되므로
+  // 여기도 0 으로 되돌린다 ('modes' 가 재시작 신호다). 계정과 구독 한도 잔여량은
+  // 이 줄이 아니라 설정 창에 있다.
   let session = { tokens: 0, cost: 0 };
-  let limits = [];
 
   function short(n) {
     if (n < 1000) return String(n);
@@ -74,11 +65,9 @@
   }
 
   function paintUsage() {
-    const parts = limits.map((l) => l.label + ' ' + l.remaining + '%');
-    if (session.tokens) {
-      parts.push(short(session.tokens) + ' · $' + session.cost.toFixed(session.cost >= 1 ? 2 : 3));
-    }
-    usageLabel.textContent = parts.join(' · ');
+    usageLabel.textContent = session.tokens
+      ? short(session.tokens) + ' · $' + session.cost.toFixed(session.cost >= 1 ? 2 : 3)
+      : '';
   }
 
   function addUsage(evt) {
@@ -89,24 +78,6 @@
     session.cost += evt.cost || 0;
     paintUsage();
   }
-
-  async function refreshAccount() {
-    let res;
-    try {
-      res = await window.api.getAccount();
-    } catch {
-      return; // 상태 줄 한 칸이 비는 것뿐이다. 대화를 막지 않는다.
-    }
-    const a = res.auth || {};
-    let text = a.loggedIn
-      ? (a.email || '(이메일 없음)') + (a.plan ? ' · ' + a.plan : '')
-      : (a.error ? '계정: ' + a.error : '로그인 안 됨');
-    limits = (res.limits && res.limits.limits) || [];
-    if (!limits.length && res.limits && res.limits.error) text += ' · 잔여량: ' + res.limits.error;
-    acctLabel.textContent = text;
-    paintUsage();
-  }
-  refreshAccount();
 
   // --- 대화 -----------------------------------------------------------------
 
@@ -124,10 +95,8 @@
       streaming.textContent += evt.text;
       log.scrollTop = log.scrollHeight;
     } else if (evt.type === 'modes') {
-      // 배지는 설정값이 아니라 main 이 실제로 건 것을 보여준다 — headroom 이
-      // 자동으로 빠지거나 SKILL.md 를 못 찾으면 둘이 어긋난다.
-      modesLabel.textContent = evt.modes.length ? evt.modes.join(' · ') : '';
-      // 에이전트가 새로 떴다 = 대화도 사용량도 처음부터다.
+      // 에이전트가 새로 떴다 = 대화도 사용량도 처음부터다. 어떤 모드가 걸렸는지는
+      // note() 로 대화창에 이미 찍힌다 — 상태 줄에 또 달지 않는다.
       session = { tokens: 0, cost: 0 };
       paintUsage();
     } else if (evt.type === 'tool') {
@@ -137,7 +106,6 @@
       addUsage(evt);
     } else if (evt.type === 'done') {
       streaming = null;
-      refreshAccount(); // 한도가 줄었을 수 있다. main 쪽에서 30초 캐시로 묶는다.
     } else if (evt.type === 'error') {
       streaming = null;
       line('err', '! ' + evt.text);

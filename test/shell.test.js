@@ -39,6 +39,14 @@ app.whenReady().then(async () => {
 
   // 설정 창은 하나만 뜬다. 닫은 뒤에 다시 열면 새로 뜬다.
   const s1 = openSettingsWindow(win);
+  // 계정 칸이 실제로 그려지는지. account:get 핸들러는 이 하네스에 없어서
+  // (main/app.js 를 안 띄운다) 렌더러가 실패 경로로 들어간다 — 그래도 칸은 떠야 한다.
+  await new Promise((r) => s1.webContents.once('did-finish-load', r));
+  await wait(300);
+  const text = await s1.webContents.executeJavaScript('document.body.innerText');
+  for (const want of ['계정', '설정을 못 읽었다']) {
+    assert.ok(text.includes(want), `설정 창에 "${want}" 칸이 없다: ${text.slice(0, 120)}`);
+  }
   assert.strictEqual(openSettingsWindow(win), s1, '설정 창이 두 개 떴다');
   s1.destroy();
   const s2 = openSettingsWindow(win);

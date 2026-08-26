@@ -100,11 +100,11 @@ main/tools.js    CDP 브라우저 도구 6개. MCP 도 Electron 창 구조도 �
 main/mcp.js      도구 6개를 MCP 툴로 등록하고 localhost HTTP 로 노출. CDP 를 모른다.
 main/deps.js     외부 도구 4개 점검·설치. electron 을 require 하지 않는다.
 main/modes.js    토큰 절약 모드. 시스템 프롬프트 조립 + 자식 env 조립. electron 을 require 하지 않는다.
-main/account.js  붙어 있는 계정(claude auth status)과 구독 한도 잔여량. electron 을 require 하지 않는다.
+main/account.js  계정 조회/로그아웃/로그인(claude auth *)과 구독 한도 잔여량. electron 을 require 하지 않는다.
 main/workspace.js 에이전트 작업 디렉터리 비우기. 경로 안전장치 포함. electron 을 require 하지 않는다.
 main/preload.js  contextBridge 로 window.api 노출.
-renderer/chat.html  채팅 UI + 맨 아래 상태 줄(계정·모드·잔여량·⚙). innerHTML 안 쓴다 — 전부 textContent.
-renderer/settings.html 설정 창. 같은 preload, 같은 CSP, 같은 textContent 규칙.
+renderer/chat.html  채팅 UI + 맨 아래 상태 줄(이번 세션이 태운 토큰·비용, ⚙). innerHTML 안 쓴다 — 전부 textContent.
+renderer/settings.html 설정 창 — 계정(로그아웃/로그인)과 토큰 절약. 같은 preload, 같은 CSP, 같은 textContent 규칙.
 test/            아래 테스트 절 참고
 spike/           동결된 게이트 산출물. import 하지도 고치지도 말 것.
 docs/superpowers/  spec 과 plan
@@ -160,8 +160,32 @@ true. **기본값은 전부 꺼짐**이다. 설정은 `app.getPath('userData')/s
 시점에만 정해지므로 다른 방법이 없다. UI 가 이걸 명시한다.
 
 `headroom` 을 켰는데 프록시가 안 떠 있으면 그 실행에서만 자동으로 뺀다. 안 그러면
-모든 요청이 죽는데 증상이 "AI 가 응답을 안 한다" 로만 보인다. 상태 줄 배지는
-"켜달라고 한 것" 이 아니라 **실제로 걸린 것**(`modes` 이벤트)을 보여준다.
+모든 요청이 죽는데 증상이 "AI 가 응답을 안 한다" 로만 보인다. 실제로 걸린 모드는
+"켜달라고 한 것" 이 아니라 **실제로 붙은 것**을 대화창에 찍는다 — headroom 이
+자동으로 빠지거나 SKILL.md 를 못 찾으면 설정 화면의 체크박스와 어긋난다.
+
+---
+
+## 계정
+
+계정은 맨 아래 상태 줄이 아니라 **설정 창(⚙) 맨 위**에 있다. 상태 줄에는 이번
+세션이 태운 토큰과 비용만 남긴다 — 380px 폭에서 계정·모드·한도까지 밀어 넣으면
+줄이 잘린다.
+
+- 표시: 이메일 · 플랜 · 조직 (`claude auth status --json`) 과 5시간/주간 잔여 %.
+- **로그아웃**은 비대화형이라 그냥 돌린다. 성공하면 **에이전트를 같이 세운다** —
+  안 세우면 다음 요청부터 전부 401 인데 사용자에게는 "AI 가 응답을 안 한다" 로만
+  보인다.
+- **로그인**은 대화형 TUI 다(브라우저를 열고 콘솔에 코드를 붙여넣는다). Electron 은
+  GUI 프로세스라 자식에게 물려줄 콘솔이 없다 — `detached` 로 띄워도
+  DETACHED_PROCESS 라 콘솔이 아예 안 붙는다. 그래서 윈도우에서는
+  `cmd /c start "" cmd /s /k "<claude> auth login --claudeai"` 로 콘솔 창을 새로
+  띄운다(`windowsVerbatimArguments`, `/k` 로 실패해도 창이 남는다). 다른 OS 에서는
+  터미널에서 직접 하라고 안내만 한다.
+- 콘솔 창이 끝났다고 앱에 알려주는 신호가 없다. 로그인 버튼을 누르면 설정 창이
+  5초 간격으로 2분간 계정을 다시 읽고, 로그인된 게 보이면 **에이전트를 다시
+  띄운다**(`account:get` 안에서). 앱 재시작이 필요 없다.
+- 액세스 토큰은 `main/account.js` 밖으로 안 나간다 — 렌더러로도, 로그로도.
 
 ---
 

@@ -11,7 +11,7 @@ const { startMcpServer } = require('./mcp.js');
 const { createAgent } = require('./claude.js');
 const { clearDir } = require('./workspace.js');
 const { checkAll, install, claudeBin } = require('./deps.js');
-const { authStatus, subscriptionUsage } = require('./account.js');
+const { authStatus, logout, openLogin, subscriptionUsage } = require('./account.js');
 const {
   loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled,
   isHeadroomUp, headroomUrl,
@@ -161,8 +161,11 @@ app.whenReady().then(async () => {
   // 프로세스를 띄우고 네트워크를 치면 낭비다. 30초 캐시로 묶는다.
   let accountCache = null;
   let accountAt = 0;
-  ipcMain.handle('account:get', async () => {
-    if (accountCache && Date.now() - accountAt < 30000) return accountCache;
+  // 로그아웃으로 에이전트를 세운 상태. 설정 창이 새로고침해서 다시 로그인된 걸
+  // 확인하면 그때 되살린다 (앱 재시작을 시키지 않으려고).
+  let loggedOut = false;
+  ipcMain.handle('account:get', async (_e, force) => {
+    if (!force && accountCache && Date.now() - accountAt < 30000) return accountCache;
     const bin = await claudeBin();
     const [auth, limits] = await Promise.all([
       bin ? authStatus(bin) : { error: 'Claude Code 를 못 찾았다' },
@@ -170,7 +173,34 @@ app.whenReady().then(async () => {
     ]);
     accountCache = { auth, limits };
     accountAt = Date.now();
+    if (loggedOut && auth.loggedIn) {
+      loggedOut = false;
+      await startAgent();
+    }
     return accountCache;
+  });
+
+  ipcMain.handle('account:logout', async () => {
+    const bin = await claudeBin();
+    if (!bin) return { ok: false, detail: 'Claude Code 를 못 찾았다' };
+    const res = await logout(bin);
+    accountCache = null;
+    // 로그아웃하면 다음 요청부터 전부 401 이다. 에이전트를 살려두면 사용자는
+    // "AI 가 응답을 안 한다"만 보게 된다. 지금 세워두고 이유를 말해준다.
+    if (res.ok) {
+      loggedOut = true;
+      if (agent) agent.stop();
+      agent = null;
+      emit({ type: 'error', text: '로그아웃했다. 다시 로그인하면 에이전트가 다시 뜬다.' });
+    }
+    return res;
+  });
+
+  ipcMain.handle('account:login', async () => {
+    const bin = await claudeBin();
+    if (!bin) return { ok: false, detail: 'Claude Code 를 못 찾았다' };
+    accountCache = null;
+    return openLogin(bin);
   });
 
   ipcMain.handle('settings:open', () => {
