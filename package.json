@@ -11,7 +11,9 @@
     "start": "electron .",
     "test:shell": "electron test/shell.test.js",
     "test:agent": "node test/agent.test.js",
-    "test:tools": "electron test/tools.test.js"
+    "test:tools": "electron test/tools.test.js",
+    "test:deps": "node test/deps.test.js",
+    "test:modes": "node test/modes.test.js"
   },
   "repository": {
     "type": "git",
