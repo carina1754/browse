@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   checkDeps: () => ipcRenderer.invoke('deps:check'),
   installDep: (name) => ipcRenderer.invoke('deps:install', name),
   getAccount: () => ipcRenderer.invoke('account:get'),
+  openSettings: () => ipcRenderer.invoke('settings:open'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (next) => ipcRenderer.invoke('settings:set', next),
 });

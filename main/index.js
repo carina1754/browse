@@ -1,6 +1,6 @@
 // main/index.js
 const path = require('node:path');
-const { BaseWindow, WebContentsView, Menu, screen } = require('electron');
+const { BaseWindow, BrowserWindow, WebContentsView, Menu, screen } = require('electron');
 
 const CHAT_WIDTH = 380;
 
@@ -57,4 +57,35 @@ function createWindow() {
   return { win, chatView, pageView };
 }
 
-module.exports = { createWindow, CHAT_WIDTH, RELAYOUT_EVENTS };
+// 설정은 채팅 사이드바 안이 아니라 별도 창이다. 항목이 계속 늘어날 자리라
+// 380px 패널에 접어 넣으면 금방 스크롤 지옥이 된다.
+// 창은 하나만 둔다 — ⚙ 를 여러 번 눌러도 같은 창을 앞으로 가져온다.
+let settingsWin = null;
+
+function openSettingsWindow(parent) {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    if (settingsWin.isMinimized()) settingsWin.restore();
+    settingsWin.focus();
+    return settingsWin;
+  }
+  settingsWin = new BrowserWindow({
+    width: 520,
+    height: 640,
+    title: '설정',
+    parent: parent && !parent.isDestroyed() ? parent : undefined,
+    show: false,
+    backgroundColor: '#1e1e1e', // 흰 화면이 한 번 번쩍이는 걸 막는다
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  settingsWin.setMenu(null);
+  settingsWin.loadFile(path.join(__dirname, '..', 'renderer', 'settings.html'));
+  settingsWin.once('ready-to-show', () => settingsWin.show());
+  settingsWin.on('closed', () => { settingsWin = null; });
+  return settingsWin;
+}
+
+module.exports = { createWindow, openSettingsWindow, CHAT_WIDTH, RELAYOUT_EVENTS };

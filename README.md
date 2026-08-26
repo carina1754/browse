@@ -44,6 +44,8 @@ BaseWindow
 ├── chatView  (WebContentsView, 380px, renderer/chat.html + preload)
 └── pageView  (WebContentsView, 나머지 — 에이전트가 운전하는 진짜 웹페이지)
 
+BrowserWindow (별도 창, renderer/settings.html + 같은 preload)  ⚙ 를 눌러야 뜬다
+
 main/app.js  ── IPC ──> chatView
      │
      ├── createTools(pageView.webContents)   CDP (webContents.debugger, in-process)
@@ -101,7 +103,8 @@ main/modes.js    토큰 절약 모드. 시스템 프롬프트 조립 + 자식 en
 main/account.js  붙어 있는 계정(claude auth status)과 구독 한도 잔여량. electron 을 require 하지 않는다.
 main/workspace.js 에이전트 작업 디렉터리 비우기. 경로 안전장치 포함. electron 을 require 하지 않는다.
 main/preload.js  contextBridge 로 window.api 노출.
-renderer/chat.html  채팅 UI 전부 (인라인 스크립트). innerHTML 을 쓰지 않는다 — 전부 textContent.
+renderer/chat.html  채팅 UI + 맨 아래 상태 줄(계정·모드·잔여량·⚙). innerHTML 안 쓴다 — 전부 textContent.
+renderer/settings.html 설정 창. 같은 preload, 같은 CSP, 같은 textContent 규칙.
 test/            아래 테스트 절 참고
 spike/           동결된 게이트 산출물. import 하지도 고치지도 말 것.
 docs/superpowers/  spec 과 plan
@@ -138,7 +141,7 @@ startAgent()
 
 ## 토큰 절약 모드
 
-⚙ 패널에 마스터 스위치(`tokenSaver`) 하나와 모드 3개. `enabled()` 는 둘 다 켜져야
+설정 창(⚙)에 마스터 스위치(`tokenSaver`) 하나와 모드 3개. `enabled()` 는 둘 다 켜져야
 true. **기본값은 전부 꺼짐**이다. 설정은 `app.getPath('userData')/settings.json`.
 
 | 모드 | 어디를 치나 |
@@ -157,7 +160,7 @@ true. **기본값은 전부 꺼짐**이다. 설정은 `app.getPath('userData')/s
 시점에만 정해지므로 다른 방법이 없다. UI 가 이걸 명시한다.
 
 `headroom` 을 켰는데 프록시가 안 떠 있으면 그 실행에서만 자동으로 뺀다. 안 그러면
-모든 요청이 죽는데 증상이 "AI 가 응답을 안 한다" 로만 보인다. 헤더 배지는
+모든 요청이 죽는데 증상이 "AI 가 응답을 안 한다" 로만 보인다. 상태 줄 배지는
 "켜달라고 한 것" 이 아니라 **실제로 걸린 것**(`modes` 이벤트)을 보여준다.
 
 ---
@@ -186,8 +189,8 @@ true. **기본값은 전부 꺼짐**이다. 설정은 `app.getPath('userData')/s
   아래뿐이고, 경로 모양이 다르면 아무것도 안 지운다. 심볼릭 링크는 링크만 지운다.
 - 자식 env 에서 `CLAUDECODE*` / `CLAUDE_CODE_*` 를 **무조건** 뗀다. 이 앱을 Claude
   Code 세션 안에서 띄우면 자식이 그 세션의 IPC 소켓과 토큰을 물려받는다.
-- renderer 는 `contextIsolation: true`, `nodeIntegration: false`. chat.html 은
-  `innerHTML` 을 쓰지 않는다 — 에이전트가 가져온 페이지 텍스트가 UI 로 그대로 들어오므로.
+- renderer 는 `contextIsolation: true`, `nodeIntegration: false`. chat.html 과
+  settings.html 은 `innerHTML` 을 쓰지 않는다 — 에이전트가 가져온 페이지 텍스트가 UI 로 그대로 들어오므로.
 
 env 는 **denylist** 다 (allowlist 아님). 리뷰에서 allowlist 를 권고받았지만 기각했다 —
 `claude.exe` 가 인증에 필요한 env 를 전부 열거하려다 하나 빠뜨리면 OAuth 가 조용히
@@ -289,7 +292,7 @@ npm test            # 유료 API 호출 포함 (agent + security)
   shim 2개(`opencode.cmd` → `.exe` 타깃, `corepack.cmd` → `.js` 타깃)로 검증했지만,
   풀어낸 `node cli.js` 가 실제로 claude 로 뜨는 건 npm-global 머신에서 확인해야 한다.
   `⚙` 점검에 `2.1.246 (Claude Code)  (node ...cli.js)` 처럼 실행 형태가 같이 나온다.
-- chat.html 의 CSP 는 `default-src 'none'` 에 스크립트/스타일만 `'unsafe-inline'` 이다.
+- chat.html / settings.html 의 CSP 는 `default-src 'none'` 에 스크립트/스타일만 `'unsafe-inline'` 이다.
   인라인이라 어쩔 수 없다 — 그래서 화면에 넣는 에이전트 텍스트는 `textContent` 로만
   넣어야 한다. `innerHTML` 을 쓰는 순간 이 정책은 못 막는다.
 - `click()` 은 좌표를 못 구하는 요소(화면 밖, 크기 0, 렌더링 안 됨)에서만 JS 클릭으로

@@ -11,25 +11,6 @@
 <style>
   html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; }
   body { display: flex; flex-direction: column; background: #1e1e1e; color: #e0e0e0; }
-  #head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #333; font-size: 12px; color: #888; }
-  #head b { flex: 1; font-weight: 500; }
-  #gear { cursor: pointer; background: none; border: 0; color: #888; font-size: 15px; padding: 2px 4px; }
-  #gear:hover { color: #e0e0e0; }
-  /* 계정·잔여량 줄. 창이 380px 라 두 칸 모두 넘치면 말줄임으로 자른다 —
-     줄바꿈을 허용하면 헤더 높이가 변해서 아래 대화창이 튄다. */
-  #status { display: flex; gap: 8px; padding: 4px 10px; border-bottom: 1px solid #333; font-size: 11px; color: #777; white-space: nowrap; overflow: hidden; }
-  #acct { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-  #usage { flex: 0 0 auto; }
-  #panel { display: none; border-bottom: 1px solid #333; padding: 10px; font-size: 12px; max-height: 45%; overflow-y: auto; }
-  #panel.open { display: block; }
-  .row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
-  .row label { flex: 1; cursor: pointer; }
-  .row.sub { padding-left: 16px; }
-  .row.sub.off label { color: #666; }
-  .why { color: #777; font-size: 11px; padding: 0 0 6px 40px; }
-  .row button { background: #2f6f3f; border: 0; color: #fff; border-radius: 3px; padding: 3px 8px; font: inherit; cursor: pointer; }
-  .row button[disabled] { background: #444; color: #888; cursor: default; }
-  .warn { color: #b58900; font-size: 11px; padding-top: 8px; border-top: 1px solid #333; margin-top: 6px; }
   #log { flex: 1; overflow-y: auto; padding: 12px; white-space: pre-wrap; }
   .user { color: #7cc3ff; margin-top: 12px; }
   .tool { color: #b58900; font-size: 12px; }
@@ -37,22 +18,31 @@
   #bar { display: flex; border-top: 1px solid #333; }
   #input { flex: 1; padding: 10px; border: 0; background: #2a2a2a; color: inherit; font: inherit; }
   #input:focus { outline: none; }
+  /* 맨 아래 한 줄에 계정·모드·잔여량·설정을 몰아넣는다. 창이 380px 라 넘칠 수밖에
+     없어서 계정 칸만 줄어들며 말줄임으로 잘린다. 줄바꿈은 막는다 — 바 높이가
+     바뀌면 위 대화창이 튄다. */
+  #status { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-top: 1px solid #333; font-size: 11px; color: #777; white-space: nowrap; overflow: hidden; }
+  #acct { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #modes, #usage { flex: 0 0 auto; }
+  #modes { color: #b58900; }
+  #gear { flex: 0 0 auto; cursor: pointer; background: none; border: 0; color: #888; font-size: 13px; padding: 0 2px; }
+  #gear:hover { color: #e0e0e0; }
 </style>
-<div id="head"><b>AI Browser</b><span id="modes"></span><button id="gear" title="설정">⚙</button></div>
-<div id="status"><span id="acct">계정 확인 중…</span><span id="usage"></span></div>
-<div id="panel"></div>
 <div id="log"></div>
 <div id="bar"><input id="input" placeholder="무엇을 할까요?" autofocus /></div>
+<div id="status">
+  <button id="gear" title="설정">⚙</button>
+  <span id="acct">계정 확인 중…</span>
+  <span id="modes"></span>
+  <span id="usage"></span>
+</div>
 <script>
   const log = document.getElementById('log');
   const input = document.getElementById('input');
-  const panel = document.getElementById('panel');
   const modesLabel = document.getElementById('modes');
   const acctLabel = document.getElementById('acct');
   const usageLabel = document.getElementById('usage');
   let streaming = null;
-  let settings = null;
-  let deps = [];
 
   function line(cls, text) {
     const el = document.createElement('div');
@@ -63,105 +53,11 @@
     return el;
   }
 
-  // --- 설정 패널 -------------------------------------------------------------
-
-  function el(tag, cls, text) {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  }
-
-  async function apply(next) {
-    // 재시작이 도는 동안 또 토글하면 에이전트가 겹쳐 뜬다. 잠가둔다.
-    const inputs = panel.querySelectorAll('input, button');
-    inputs.forEach((i) => { i.disabled = true; });
-    try {
-      settings = await window.api.setSettings(next);
-    } finally {
-      render();
-    }
-  }
-
-  function render() {
-    if (!panel.classList.contains('open')) return;
-    panel.replaceChildren();
-
-    const master = el('div', 'row');
-    const mbox = el('input');
-    mbox.type = 'checkbox';
-    mbox.checked = !!settings.tokenSaver;
-    mbox.id = 'master';
-    mbox.onchange = () => apply({ ...settings, tokenSaver: mbox.checked });
-    const mlabel = el('label', null, '토큰 절약');
-    mlabel.htmlFor = 'master';
-    master.append(mbox, mlabel);
-    panel.append(master);
-
-    for (const d of deps) {
-      if (d.name === 'claude') continue; // 필수 도구는 아래에서 따로 다룬다
-      const row = el('div', 'row sub');
-      if (!settings.tokenSaver) row.classList.add('off');
-
-      const box = el('input');
-      box.type = 'checkbox';
-      box.id = 'm-' + d.name;
-      box.checked = !!settings.modes[d.name];
-      // 마스터가 꺼져 있거나 도구가 없으면 켤 수 없다.
-      box.disabled = !settings.tokenSaver || !d.ok;
-      box.onchange = () => apply({
-        ...settings,
-        modes: { ...settings.modes, [d.name]: box.checked },
-      });
-
-      const label = el('label', null, d.label);
-      label.htmlFor = box.id;
-      row.append(box, label);
-
-      if (!d.ok) row.append(installButton(d));
-      panel.append(row, el('div', 'why', d.why));
-    }
-
-    const claude = deps.find((d) => d.name === 'claude');
-    if (claude && !claude.ok) {
-      const row = el('div', 'row');
-      row.append(el('label', null, claude.label + ' (필수 — 없으면 아무것도 안 된다)'), installButton(claude));
-      panel.append(row);
-    }
-
-    panel.append(el('div', 'warn', '설정을 바꾸면 에이전트가 재시작되고 지금까지 대화는 초기화된다. 설치 진행 상황은 아래 대화창에 그대로 나온다.'));
-  }
-
-  function installButton(dep) {
-    const btn = el('button', null, '설치');
-    btn.onclick = async () => {
-      btn.disabled = true;
-      btn.textContent = '설치 중…';
-      try {
-        await window.api.installDep(dep.name);
-        deps = await window.api.checkDeps();
-      } catch (e) {
-        // 여기서 안 잡으면 버튼이 "설치 중…" 으로 영원히 굳고 아무 데도 안 뜬다.
-        line('err', '! 설치 호출 실패: ' + (e && e.message ? e.message : e));
-      } finally {
-        render();
-      }
-    };
-    return btn;
-  }
-
-  document.getElementById('gear').onclick = async () => {
-    panel.classList.toggle('open');
-    if (panel.classList.contains('open')) {
-      [settings, deps] = await Promise.all([window.api.getSettings(), window.api.checkDeps()]);
-      render();
-    }
+  // 설정은 이 창이 아니라 별도 창(renderer/settings.html)이다. 항목이 계속
+  // 늘어날 자리라 380px 사이드바 안에 접어 넣을 게 못 된다.
+  document.getElementById('gear').onclick = () => {
+    window.api.openSettings().catch((e) => line('err', '! 설정 창을 못 열었다: ' + (e && e.message ? e.message : e)));
   };
-
-  // 배지는 여기서 채우지 않는다. main 이 에이전트를 실제로 띄운 뒤 'modes'
-  // 이벤트로 알려준다 — headroom 이 자동으로 빠지거나 SKILL.md 를 못 찾으면
-  // 설정값과 실제로 걸린 것이 달라진다.
-  window.api.getSettings().then((s) => { settings = s; }).catch(() => {});
 
   // --- 계정·사용량 -----------------------------------------------------------
   // 한 줄에 두 가지를 같이 건다. 성격이 다르다.
@@ -180,7 +76,7 @@
   function paintUsage() {
     const parts = limits.map((l) => l.label + ' ' + l.remaining + '%');
     if (session.tokens) {
-      parts.push('세션 ' + short(session.tokens) + ' · $' + session.cost.toFixed(session.cost >= 1 ? 2 : 3));
+      parts.push(short(session.tokens) + ' · $' + session.cost.toFixed(session.cost >= 1 ? 2 : 3));
     }
     usageLabel.textContent = parts.join(' · ');
   }
@@ -199,7 +95,7 @@
     try {
       res = await window.api.getAccount();
     } catch {
-      return; // 헤더 한 줄이 비는 것뿐이다. 대화를 막지 않는다.
+      return; // 상태 줄 한 칸이 비는 것뿐이다. 대화를 막지 않는다.
     }
     const a = res.auth || {};
     let text = a.loggedIn
@@ -228,6 +124,8 @@
       streaming.textContent += evt.text;
       log.scrollTop = log.scrollHeight;
     } else if (evt.type === 'modes') {
+      // 배지는 설정값이 아니라 main 이 실제로 건 것을 보여준다 — headroom 이
+      // 자동으로 빠지거나 SKILL.md 를 못 찾으면 둘이 어긋난다.
       modesLabel.textContent = evt.modes.length ? evt.modes.join(' · ') : '';
       // 에이전트가 새로 떴다 = 대화도 사용량도 처음부터다.
       session = { tokens: 0, cost: 0 };

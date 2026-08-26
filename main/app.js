@@ -5,7 +5,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const { app, ipcMain } = require('electron');
-const { createWindow } = require('./index.js');
+const { createWindow, openSettingsWindow } = require('./index.js');
 const { createTools } = require('./tools.js');
 const { startMcpServer } = require('./mcp.js');
 const { createAgent } = require('./claude.js');
@@ -30,7 +30,7 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 app.whenReady().then(async () => {
-  const { chatView, pageView } = createWindow();
+  const { win, chatView, pageView } = createWindow();
 
   const emit = (evt) => {
     if (!chatView.webContents.isDestroyed()) {
@@ -138,7 +138,7 @@ app.whenReady().then(async () => {
         type: 'error',
         text: bootError
           ? `에이전트가 안 떠 있다: ${bootError}`
-          : '에이전트가 안 떠 있다. ⚙ 에서 Claude Code 를 설치해라.',
+          : '에이전트가 안 떠 있다. 아래 ⚙ 에서 Claude Code 를 설치해라.',
       });
       return;
     }
@@ -173,6 +173,11 @@ app.whenReady().then(async () => {
     return accountCache;
   });
 
+  ipcMain.handle('settings:open', () => {
+    openSettingsWindow(win);
+    return true; // 창 객체는 IPC 로 못 넘긴다
+  });
+
   ipcMain.handle('settings:get', () => settings);
 
   ipcMain.handle('settings:set', async (_e, next) => {
@@ -201,13 +206,13 @@ app.whenReady().then(async () => {
   }
 
   // claude.exe 가 없으면 에이전트를 띄울 수 없다. 앱은 그대로 살려두고
-  // 설정 패널에서 설치할 수 있게 안내만 한다.
+  // 설정 창에서 설치할 수 있게 안내만 한다.
   const deps = await checkAll();
   const missing = deps.filter((d) => !d.ok);
   const claude = deps.find((d) => d.name === 'claude');
 
   if (!claude || !claude.ok) {
-    emit({ type: 'error', text: 'Claude Code 가 없다. 오른쪽 위 ⚙ 에서 설치해라.' });
+    emit({ type: 'error', text: 'Claude Code 가 없다. 아래 상태 줄의 ⚙ 에서 설치해라.' });
     return;
   }
   if (missing.length) {

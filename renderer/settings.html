@@ -1,0 +1,136 @@
+<!doctype html>
+<meta charset="utf-8" />
+<!-- chat.html 과 같은 정책이다. IPC 로만 말하고 원격 자원을 안 쓴다.
+     화면에 들어가는 문자열은 전부 textContent 로만 넣는다 (innerHTML 금지). -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'" />
+<title>설정</title>
+<style>
+  html, body { margin: 0; height: 100%; font: 13px system-ui, sans-serif; }
+  body { background: #1e1e1e; color: #e0e0e0; overflow-y: auto; }
+  main { padding: 14px 16px 20px; }
+  h2 { font-size: 13px; font-weight: 600; color: #aaa; margin: 18px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .row label { flex: 1; cursor: pointer; }
+  .row.sub { padding-left: 16px; }
+  .row.sub.off label { color: #666; }
+  .why { color: #777; font-size: 11px; padding: 0 0 6px 40px; }
+  .row button { background: #2f6f3f; border: 0; color: #fff; border-radius: 3px; padding: 3px 8px; font: inherit; cursor: pointer; }
+  .row button[disabled] { background: #444; color: #888; cursor: default; }
+  .warn { color: #b58900; font-size: 11px; padding-top: 8px; border-top: 1px solid #333; margin-top: 10px; }
+  .err { color: #ff6b6b; font-size: 11px; padding-top: 6px; }
+</style>
+<main id="panel">불러오는 중…</main>
+<script>
+  const panel = document.getElementById('panel');
+  let settings = null;
+  let deps = [];
+  let error = '';
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  async function apply(next) {
+    // 재시작이 도는 동안 또 토글하면 에이전트가 겹쳐 뜬다. 잠가둔다.
+    panel.querySelectorAll('input, button').forEach((i) => { i.disabled = true; });
+    try {
+      settings = await window.api.setSettings(next);
+      error = '';
+    } catch (e) {
+      error = '설정 저장 실패: ' + (e && e.message ? e.message : e);
+    } finally {
+      render();
+    }
+  }
+
+  function render() {
+    panel.replaceChildren();
+    if (!settings) {
+      panel.append(el('div', null, '불러오는 중…'));
+      return;
+    }
+
+    panel.append(el('h2', null, '토큰 절약'));
+
+    const master = el('div', 'row');
+    const mbox = el('input');
+    mbox.type = 'checkbox';
+    mbox.checked = !!settings.tokenSaver;
+    mbox.id = 'master';
+    mbox.onchange = () => apply({ ...settings, tokenSaver: mbox.checked });
+    const mlabel = el('label', null, '토큰 절약 켜기');
+    mlabel.htmlFor = 'master';
+    master.append(mbox, mlabel);
+    panel.append(master);
+
+    for (const d of deps) {
+      if (d.name === 'claude') continue; // 필수 도구는 아래에서 따로 다룬다
+      const row = el('div', 'row sub');
+      if (!settings.tokenSaver) row.classList.add('off');
+
+      const box = el('input');
+      box.type = 'checkbox';
+      box.id = 'm-' + d.name;
+      box.checked = !!settings.modes[d.name];
+      // 마스터가 꺼져 있거나 도구가 없으면 켤 수 없다.
+      box.disabled = !settings.tokenSaver || !d.ok;
+      box.onchange = () => apply({
+        ...settings,
+        modes: { ...settings.modes, [d.name]: box.checked },
+      });
+
+      const label = el('label', null, d.label);
+      label.htmlFor = box.id;
+      row.append(box, label);
+
+      if (!d.ok) row.append(installButton(d));
+      panel.append(row, el('div', 'why', d.why));
+    }
+
+    const claude = deps.find((d) => d.name === 'claude');
+    if (claude) {
+      panel.append(el('h2', null, '필수'));
+      const row = el('div', 'row');
+      row.append(el('label', null, claude.label + (claude.ok ? ' — 설치됨' : ' (없으면 아무것도 안 된다)')));
+      if (!claude.ok) row.append(installButton(claude));
+      panel.append(row, el('div', 'why', claude.why));
+    }
+
+    panel.append(el('div', 'warn', '설정을 바꾸면 에이전트가 재시작되고 지금까지 대화는 초기화된다. 설치 진행 상황은 채팅 창에 그대로 나온다.'));
+    if (error) panel.append(el('div', 'err', error));
+  }
+
+  function installButton(dep) {
+    const btn = el('button', null, '설치');
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = '설치 중…';
+      try {
+        await window.api.installDep(dep.name);
+        deps = await window.api.checkDeps();
+        error = '';
+      } catch (e) {
+        // 여기서 안 잡으면 버튼이 "설치 중…" 으로 영원히 굳는다.
+        error = '설치 호출 실패: ' + (e && e.message ? e.message : e);
+      } finally {
+        render();
+      }
+    };
+    return btn;
+  }
+
+  async function load() {
+    try {
+      [settings, deps] = await Promise.all([window.api.getSettings(), window.api.checkDeps()]);
+    } catch (e) {
+      error = '설정을 못 읽었다: ' + (e && e.message ? e.message : e);
+    }
+    render();
+  }
+  load();
+</script>
