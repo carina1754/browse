@@ -92,7 +92,7 @@ main/app.js  ── IPC ──> chatView
 
 ```
 main/app.js      Electron 진입점 (package.json "main"). 부팅 순서와 모든 IPC 핸들러.
-main/index.js    createWindow() 만 있는 부작용 없는 모듈. 테스트가 require 해도 앱이 안 뜬다.
+main/index.js    createWindow() 만 있는 부작용 없는 모듈. 창 크기 변화를 뷰 두 개에 옮긴다.
 main/claude.js   claude.exe spawn, argv 조립, NDJSON 스트림 파싱, BLOCKED_TOOLS.
 main/tools.js    CDP 브라우저 도구 6개. MCP 도 Electron 창 구조도 모른다.
 main/mcp.js      도구 6개를 MCP 툴로 등록하고 localhost HTTP 로 노출. CDP 를 모른다.
