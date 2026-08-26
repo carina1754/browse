@@ -28,7 +28,6 @@ function createWindow() {
   win.on('resize', layout);
 
   chatView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'chat.html'));
-  pageView.webContents.loadURL('about:blank');
 
   return { win, chatView, pageView };
 }
