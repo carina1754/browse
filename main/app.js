@@ -9,6 +9,7 @@ const { createWindow } = require('./index.js');
 const { createTools } = require('./tools.js');
 const { startMcpServer } = require('./mcp.js');
 const { createAgent } = require('./claude.js');
+const { clearDir } = require('./workspace.js');
 const { checkAll, install, claudeBin } = require('./deps.js');
 const {
   loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled,
@@ -41,6 +42,10 @@ app.whenReady().then(async () => {
   const agentCwd = path.join(app.getPath('userData'), 'agent-cwd');
   fs.mkdirSync(agentCwd, { recursive: true });
 
+  // 지난 실행이 남긴 파일은 다음 실행의 컨텍스트로 샌다 (에이전트가 cwd 를 훑는다).
+  // 부팅 시점엔 렌더러가 아직 없다. settingsError 처럼 첫 doStart 에서 흘린다.
+  const cwdFailed = clearDir(agentCwd, app.getPath('userData'), 'agent-cwd');
+
   const settingsFile = path.join(app.getPath('userData'), 'settings.json');
   // 렌더러가 아직 안 붙었을 수 있다. bootError 와 같이 첫 doStart 에서 흘린다.
   let settingsError = null;
@@ -57,6 +62,10 @@ app.whenReady().then(async () => {
     if (settingsError) {
       emit({ type: 'error', text: settingsError });
       settingsError = null;
+    }
+    if (cwdFailed.length) {
+      emit({ type: 'error', text: `작업 디렉터리를 다 비우지 못했다 (남은 파일이 컨텍스트로 샐 수 있다): ${cwdFailed.join(', ')}` });
+      cwdFailed.length = 0;
     }
     if (!mcp) {
       // 부팅이 깨졌으면 여기서 조용히 돌아가면 안 된다. 원인을 말해준다.

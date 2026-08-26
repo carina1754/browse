@@ -98,6 +98,7 @@ main/tools.js    CDP 브라우저 도구 6개. MCP 도 Electron 창 구조도 �
 main/mcp.js      도구 6개를 MCP 툴로 등록하고 localhost HTTP 로 노출. CDP 를 모른다.
 main/deps.js     외부 도구 4개 점검·설치. electron 을 require 하지 않는다.
 main/modes.js    토큰 절약 모드. 시스템 프롬프트 조립 + 자식 env 조립. electron 을 require 하지 않는다.
+main/workspace.js 에이전트 작업 디렉터리 비우기. 경로 안전장치 포함. electron 을 require 하지 않는다.
 main/preload.js  contextBridge 로 window.api 노출.
 renderer/chat.html  채팅 UI 전부 (인라인 스크립트). innerHTML 을 쓰지 않는다 — 전부 textContent.
 test/            아래 테스트 절 참고
@@ -116,6 +117,7 @@ docs/superpowers/  spec 과 plan
 
 ```
 createWindow()                chat.html 로딩 시작 (렌더러 스크립트가 곧 돈다)
+agent-cwd 비우기
 settings 로드
 IPC 핸들러 전부 등록           <-- 여기 위로 await 가 하나도 없어야 한다
 createTools + startMcpServer   (try/catch, 실패하면 bootError 에 담고 UI 에 말한다)
@@ -178,6 +180,9 @@ true. **기본값은 전부 꺼짐**이다. 설정은 `app.getPath('userData')/s
 - `--disable-slash-commands`, `--setting-sources ''`
 - **에이전트 cwd 는 항상 전용 빈 디렉터리**(`userData/agent-cwd`). 안 그러면 이
   프로젝트의 `CLAUDE.md` 가 에이전트 컨텍스트로 샌다.
+  부팅할 때마다 안을 비운다 (`main/workspace.js` 의 `clearDir`) — 지난 실행이 남긴
+  파일도 다음 실행의 컨텍스트로 새기 때문이다. 지우는 건 `userData/agent-cwd` 바로
+  아래뿐이고, 경로 모양이 다르면 아무것도 안 지운다. 심볼릭 링크는 링크만 지운다.
 - 자식 env 에서 `CLAUDECODE*` / `CLAUDE_CODE_*` 를 **무조건** 뗀다. 이 앱을 Claude
   Code 세션 안에서 띄우면 자식이 그 세션의 IPC 소켓과 토큰을 물려받는다.
 - renderer 는 `contextIsolation: true`, `nodeIntegration: false`. chat.html 은
@@ -200,6 +205,7 @@ npm test            # 유료 API 호출 포함 (agent + security)
 |---|---|---|
 | `test:deps` | 무료 | `checkAll()` 모양, 이미 깔린 것에 `install()` 이 단축 경로로 빠지는지 |
 | `test:modes` | 무료 | 프롬프트 조립, env 조립(대소문자·프록시 계열·세션 변수), 설정 병합 |
+| `test:workspace` | 무료 | 작업 디렉터리 비우기: 경로 안전장치, 심볼릭 링크를 안 따라가는지 |
 | `test:shell` | 무료 | `electron` 필요. 창/뷰 구조 |
 | `test:tools` | 무료 | `electron` 필요. CDP 도구 6개를 실제 페이지에 |
 | `test:agent` | **유료** | `claude.exe` 실제 호출 |
@@ -275,7 +281,6 @@ npm test            # 유료 API 호출 포함 (agent + security)
 - `claude plugin install` 은 아직 `<이름>@<이름>` 으로 부른다. 설치 판정은 명령의
   종료 코드가 아니라 `findSkill` 재점검이라 오탐은 없지만, 마켓플레이스 이름이
   다른 플러그인은 설치 버튼이 그냥 실패한다.
-- `agent-cwd` 를 부팅 시 비우지 않는다 (확인 없는 파일 삭제라 일부러 안 했다).
 - chat.html 의 CSP 는 `default-src 'none'` 에 스크립트/스타일만 `'unsafe-inline'` 이다.
   인라인이라 어쩔 수 없다 — 그래서 화면에 넣는 에이전트 텍스트는 `textContent` 로만
   넣어야 한다. `innerHTML` 을 쓰는 순간 이 정책은 못 막는다.
