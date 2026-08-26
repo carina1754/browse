@@ -59,9 +59,13 @@ function createAgent({ cwd, mcpUrl, model, systemPrompt, onEvent }) {
     stderr += d.toString('utf8');
   });
 
+  // 윈도우에는 SIGTERM 이 없다. stop() 의 kill() 은 TerminateProcess 라
+  // 종료 코드가 항상 0 이 아니게 나온다. 의도한 종료를 오류로 보고하지 않도록 표시해 둔다.
+  let stopping = false;
+
   child.on('error', (e) => onEvent({ type: 'error', text: `spawn failed: ${e.message}` }));
   child.on('close', (code) => {
-    if (code !== 0) {
+    if (code !== 0 && !stopping) {
       onEvent({ type: 'error', text: `claude exited ${code}: ${stderr.trim().slice(-500)}` });
     }
   });
@@ -74,6 +78,7 @@ function createAgent({ cwd, mcpUrl, model, systemPrompt, onEvent }) {
       }) + '\n');
     },
     stop() {
+      stopping = true;
       child.stdin.end();
       child.kill();
     },
