@@ -42,7 +42,9 @@ app.whenReady().then(async () => {
   fs.mkdirSync(agentCwd, { recursive: true });
 
   const settingsFile = path.join(app.getPath('userData'), 'settings.json');
-  let settings = loadSettings(settingsFile);
+  // 렌더러가 아직 안 붙었을 수 있다. bootError 와 같이 첫 doStart 에서 흘린다.
+  let settingsError = null;
+  let settings = loadSettings(settingsFile, (msg) => { settingsError = msg; });
 
   // createWindow() 가 이미 chat.html 로딩을 시작했다. 페이지 스크립트는 아래 await
   // 들보다 먼저 돈다 — 그래서 IPC 핸들러를 await 뒤에 등록하면 렌더러의 첫
@@ -52,6 +54,10 @@ app.whenReady().then(async () => {
   let bootError = null;
 
   async function doStart() {
+    if (settingsError) {
+      emit({ type: 'error', text: settingsError });
+      settingsError = null;
+    }
     if (!mcp) {
       // 부팅이 깨졌으면 여기서 조용히 돌아가면 안 된다. 원인을 말해준다.
       if (bootError) emit({ type: 'error', text: `브라우저 도구를 못 띄웠다: ${bootError}. 앱을 재시작해라.` });

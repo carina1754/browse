@@ -275,7 +275,6 @@ npm test            # 유료 API 호출 포함 (agent + security)
 - `findPlugin` 은 마켓플레이스 이름과 플러그인 이름이 같다고 가정한다.
 - `claude plugin install` 이 실패해도 성공으로 보고될 수 있다 (마켓플레이스 clone
   자체에 `SKILL.md` 가 있어서 실질적으로는 무해).
-- `settings.json` 이 깨지면 조용히 기본값으로 되돌아간다. 사용자에게 안 알린다.
 - `agent-cwd` 를 부팅 시 비우지 않는다 (확인 없는 파일 삭제라 일부러 안 했다).
 - chat.html 에 CSP meta 가 없다 (인라인 스크립트라 `unsafe-inline` 이 필요해짐).
 - `click()` 은 JS 클릭이다. 진짜 마우스 이벤트만 받는 캔버스/드래그 UI 는 못 뚫는다.

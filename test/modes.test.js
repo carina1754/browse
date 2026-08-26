@@ -163,9 +163,24 @@ assert.strictEqual(merged.modes.headroom, false, '빠진 모드 키가 undefined
   assert.ok(!fs.existsSync(`${file}.tmp`), '임시 파일이 안 지워졌다');
 }
 
-// 손상된 파일에 앱이 부팅 실패하면 안 된다
-fs.writeFileSync(file, '{ not json');
-assert.deepStrictEqual(m.loadSettings(file), m.DEFAULTS, '깨진 설정 파일에서 기본값으로 복구 못 했다');
+// 손상된 파일에 앱이 부팅 실패하면 안 된다 — 대신 사용자에게 알려야 한다
+{
+  const seen = [];
+  fs.writeFileSync(file, '{ not json');
+  assert.deepStrictEqual(m.loadSettings(file, (msg) => seen.push(msg)), m.DEFAULTS, '깨진 설정 파일에서 기본값으로 복구 못 했다');
+  assert.strictEqual(seen.length, 1, '깨진 설정 파일을 조용히 삼켰다');
+  assert.ok(fs.existsSync(`${file}.bad`), '깨진 원본을 .bad 로 보관 안 했다');
+  assert.ok(!fs.existsSync(file), '깨진 파일이 그대로 남았다');
+
+  // JSON 이지만 객체가 아닌 경우도 깨진 것으로 본다 (스프레드하면 조용히 이상해진다)
+  fs.writeFileSync(file, '[1,2]');
+  assert.deepStrictEqual(m.loadSettings(file, (msg) => seen.push(msg)), m.DEFAULTS, '배열 설정에서 기본값으로 복구 못 했다');
+  assert.strictEqual(seen.length, 2, '배열 설정을 조용히 삼켰다');
+
+  // 첫 실행(파일 없음)은 손상이 아니다. 알림이 나가면 안 된다.
+  assert.deepStrictEqual(m.loadSettings(path.join(tmp, 'nope2.json'), (msg) => seen.push(msg)), m.DEFAULTS, '없는 파일이 기본값을 안 준다');
+  assert.strictEqual(seen.length, 2, '없는 파일에 손상 알림이 나갔다');
+}
 
 // DEFAULTS 를 아무도 변형하지 않았는지
 assert.deepStrictEqual(

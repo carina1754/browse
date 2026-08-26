@@ -82,16 +82,34 @@ function loadModeText(name) {
 
 // 설정 파일은 얕게 병합한다. 새 모드가 추가되면 기존 사용자의 파일에는 그 키가
 // 없는데, 통째로 교체하면 undefined 가 되어 켤 방법이 사라진다.
-function loadSettings(file) {
+// 파일이 없는 건 첫 실행이라 정상이다. 하지만 깨진 JSON 은 다르다 — 조용히
+// 기본값으로 돌아가면 사용자가 켜둔 모드가 말없이 꺼진 채로 돈다. onCorrupt 로
+// 알리고, 원본은 .bad 로 옮겨서 다음 저장 때 덮어써 사라지는 걸 막는다.
+function loadSettings(file, onCorrupt) {
+  const fallback = () => ({ ...DEFAULTS, modes: { ...DEFAULTS.modes } });
+  let raw;
   try {
-    const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') onCorrupt?.(`설정 파일을 읽지 못했다: ${err.message}`);
+    return fallback();
+  }
+  try {
+    const saved = JSON.parse(raw);
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) throw new Error('객체가 아니다');
     return {
       ...DEFAULTS,
       ...saved,
       modes: { ...DEFAULTS.modes, ...(saved.modes ?? {}) },
     };
-  } catch {
-    return { ...DEFAULTS, modes: { ...DEFAULTS.modes } };
+  } catch (err) {
+    let kept = '';
+    try {
+      fs.renameSync(file, `${file}.bad`);
+      kept = ` 원본은 ${path.basename(file)}.bad 로 옮겼다.`;
+    } catch { /* 못 옮겨도 알림은 나간다 */ }
+    onCorrupt?.(`설정 파일이 깨졌다 (${err.message}). 기본값으로 뜬다.${kept}`);
+    return fallback();
   }
 }
 
