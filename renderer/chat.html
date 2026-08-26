@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>chat</title>
+<style>
+  html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; background: #1e1e1e; color: #e0e0e0; }
+  #log { flex: 1; overflow-y: auto; padding: 12px; white-space: pre-wrap; }
+  .user { color: #7cc3ff; margin-top: 12px; }
+  .tool { color: #b58900; font-size: 12px; }
+  .err  { color: #ff6b6b; }
+  #bar { display: flex; border-top: 1px solid #333; }
+  #input { flex: 1; padding: 10px; border: 0; background: #2a2a2a; color: inherit; font: inherit; }
+  #input:focus { outline: none; }
+</style>
+<div id="log"></div>
+<div id="bar"><input id="input" placeholder="무엇을 할까요?" autofocus /></div>
+<script>
+  const log = document.getElementById('log');
+  const input = document.getElementById('input');
+  let streaming = null;
+
+  function line(cls, text) {
+    const el = document.createElement('div');
+    el.className = cls;
+    el.textContent = text;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+    return el;
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    line('user', '> ' + input.value);
+    window.api.send(input.value);
+    input.value = '';
+    streaming = null;
+  });
+
+  window.api.onEvent((evt) => {
+    if (evt.type === 'text') {
+      if (!streaming) streaming = line('assistant', '');
+      streaming.textContent += evt.text;
+      log.scrollTop = log.scrollHeight;
+    } else if (evt.type === 'tool') {
+      streaming = null;
+      line('tool', '· ' + evt.text);
+    } else if (evt.type === 'done') {
+      streaming = null;
+    } else if (evt.type === 'error') {
+      streaming = null;
+      line('err', '! ' + evt.text);
+    }
+  });
+</script>
