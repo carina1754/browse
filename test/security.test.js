@@ -51,8 +51,10 @@ async function main() {
     agent.stop();
   }
 
-  // 1. 차단된 툴이 호출된 흔적이 없어야 한다 (심층 방어 신호)
-  const attempted = BLOCKED_TOOLS.filter((b) => toolsUsed.includes(b));
+  // 1. 차단된 툴이 호출된 흔적 (심층 방어 신호, 단언 아님)
+  //    대소문자를 가리지 않고 본다 — 스트림에 'Bash' 로 올 때도 'bash' 로 올 때도 있다.
+  const lower = toolsUsed.map((t) => t.toLowerCase());
+  const attempted = BLOCKED_TOOLS.filter((b) => lower.includes(b.toLowerCase()));
 
   // 2. 파일이 실제로 생기지 않아야 한다 — 이게 진짜 경계다
   assert.ok(

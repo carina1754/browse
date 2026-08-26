@@ -11,8 +11,8 @@ const { startMcpServer } = require('./mcp.js');
 const { createAgent } = require('./claude.js');
 const { checkAll, install } = require('./deps.js');
 const {
-  loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled, isHeadroomUp,
-  HEADROOM_DEFAULT_PORT,
+  loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled,
+  isHeadroomUp, headroomUrl,
 } = require('./modes.js');
 
 const SYSTEM_PROMPT = [
@@ -30,13 +30,6 @@ const SYSTEM_PROMPT = [
 app.whenReady().then(async () => {
   const { chatView, pageView } = createWindow();
 
-  // 프로젝트 CLAUDE.md 가 에이전트 컨텍스트로 새지 않도록 빈 전용 디렉터리를 쓴다.
-  const agentCwd = path.join(app.getPath('userData'), 'agent-cwd');
-  fs.mkdirSync(agentCwd, { recursive: true });
-
-  const settingsFile = path.join(app.getPath('userData'), 'settings.json');
-  let settings = loadSettings(settingsFile);
-
   const emit = (evt) => {
     if (!chatView.webContents.isDestroyed()) {
       chatView.webContents.send('chat:event', evt);
@@ -44,16 +37,27 @@ app.whenReady().then(async () => {
   };
   const note = (text) => emit({ type: 'tool', text });
 
+  // 프로젝트 CLAUDE.md 가 에이전트 컨텍스트로 새지 않도록 빈 전용 디렉터리를 쓴다.
+  const agentCwd = path.join(app.getPath('userData'), 'agent-cwd');
+  fs.mkdirSync(agentCwd, { recursive: true });
+
+  const settingsFile = path.join(app.getPath('userData'), 'settings.json');
+  let settings = loadSettings(settingsFile);
+
   // createWindow() 가 이미 chat.html 로딩을 시작했다. 페이지 스크립트는 아래 await
   // 들보다 먼저 돈다 — 그래서 IPC 핸들러를 await 뒤에 등록하면 렌더러의 첫
   // settings:get 이 "No handler registered" 로 죽는다. 등록을 먼저 한다.
   let agent = null;
   let mcp = null;
+  let bootError = null;
 
-  // 모드가 바뀌면 에이전트를 다시 띄운다. 시스템 프롬프트와 env 는 spawn 시점에
-  // 굳는 값이라 살아 있는 프로세스에 밀어 넣을 방법이 없다. 대화는 초기화된다.
-  async function startAgent() {
-    if (!mcp) return; // MCP 가 아직이면 bootAgent 가 곧 부른다
+  async function doStart() {
+    if (!mcp) {
+      // 부팅이 깨졌으면 여기서 조용히 돌아가면 안 된다. 원인을 말해준다.
+      if (bootError) emit({ type: 'error', text: `브라우저 도구를 못 띄웠다: ${bootError}. 앱을 재시작해라.` });
+      return;
+    }
+
     if (agent) {
       agent.stop();
       agent = null;
@@ -65,26 +69,52 @@ app.whenReady().then(async () => {
       // 안 한다"로만 보여서 원인을 찾기 어렵다. 이번 실행만 라우팅을 뺀다.
       emit({
         type: 'error',
-        text: `headroom 이 127.0.0.1:${HEADROOM_DEFAULT_PORT} 에 없다. headroom 없이 띄운다. 켜려면 터미널에서: headroom serve`,
+        text: `headroom 이 ${headroomUrl()} 에 없다. headroom 없이 띄운다. 켜려면 터미널에서: headroom serve`,
       });
       active = { ...settings, modes: { ...settings.modes, headroom: false } };
+    }
+
+    const { prompt, attached, failed } = buildSystemPrompt(SYSTEM_PROMPT, active);
+
+    // 설치돼 있다고 나왔는데 SKILL.md 를 못 찾은 경우. 조용히 빼면 UI 는 켜졌다고
+    // 표시하고 사용자는 아무 동작 변화도 못 본다.
+    for (const name of failed) {
+      emit({ type: 'error', text: `${name} 모드를 못 불러왔다 (SKILL.md 없음). 이번 실행에서 빠진다.` });
     }
 
     agent = createAgent({
       cwd: agentCwd,
       mcpUrl: mcp.url,
-      systemPrompt: buildSystemPrompt(SYSTEM_PROMPT, active),
+      systemPrompt: prompt,
       env: buildEnv(active),
       onEvent: emit,
     });
 
-    const on = Object.keys(active.modes).filter((m) => enabled(active, m));
-    note(`에이전트 시작${on.length ? ` — 토큰 절약: ${on.join(', ')}` : ''}`);
+    // 배지는 "켜달라고 한 것"이 아니라 "실제로 걸린 것"을 보여줘야 한다.
+    // headroom 이 자동으로 빠지거나 SKILL.md 를 못 찾으면 둘이 어긋난다.
+    const live = [...attached];
+    if (enabled(active, 'headroom')) live.unshift('headroom');
+    emit({ type: 'modes', modes: live });
+    note(`에이전트 시작${live.length ? ` — 토큰 절약: ${live.join(', ')}` : ''}`);
+  }
+
+  // 토글을 빠르게 두 번 누르면 doStart 가 겹친다. 첫 호출이 await isHeadroomUp()
+  // 에서 양보하는 사이 두 번째가 들어와 둘 다 agent 를 새로 만들고, 먼저 만든
+  // 자식은 추적에서 빠져 종료도 안 된다. 직렬화한다.
+  let queue = Promise.resolve();
+  function startAgent() {
+    queue = queue.then(doStart, doStart);
+    return queue;
   }
 
   ipcMain.on('chat:send', (_e, text) => {
     if (!agent) {
-      emit({ type: 'error', text: '에이전트가 안 떠 있다. ⚙ 에서 Claude Code 를 설치해라.' });
+      emit({
+        type: 'error',
+        text: bootError
+          ? `에이전트가 안 떠 있다: ${bootError}`
+          : '에이전트가 안 떠 있다. ⚙ 에서 Claude Code 를 설치해라.',
+      });
       return;
     }
     agent.send(text);
@@ -95,7 +125,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('deps:install', async (_e, name) => {
     note(`설치 시작: ${name}`);
     const res = await install(name, (line) => note(`  ${line}`));
-    note(`설치 ${res.ok ? '완료' : '실패'}: ${name} — ${res.detail}`);
+    if (res.ok) note(`설치 완료: ${name} — ${res.detail}`);
+    else emit({ type: 'error', text: `설치 ${res.needsRestart ? '주의' : '실패'}: ${name} — ${res.detail}` });
     // claude 가 방금 들어왔으면 이제 에이전트를 띄울 수 있다.
     if (res.ok && name === 'claude' && !agent) await startAgent();
     return res;
@@ -104,6 +135,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('settings:get', () => settings);
 
   ipcMain.handle('settings:set', async (_e, next) => {
+    // saveSettings 가 모양을 정리한다 — 렌더러가 보낸 걸 그대로 믿지 않는다.
     settings = saveSettings(settingsFile, next);
     if (agent) {
       note('설정 변경 — 에이전트 재시작. 지금까지 대화는 초기화된다.');
@@ -117,27 +149,30 @@ app.whenReady().then(async () => {
     if (mcp) mcp.close();
   });
 
-  const tools = await createTools(pageView.webContents);
-  mcp = await startMcpServer(tools);
+  try {
+    const tools = await createTools(pageView.webContents);
+    mcp = await startMcpServer(tools);
+  } catch (e) {
+    bootError = e.message;
+    console.error('boot failed:', e);
+    emit({ type: 'error', text: `부팅 실패: ${e.message}. 앱을 재시작해라.` });
+    return;
+  }
 
   // claude.exe 가 없으면 에이전트를 띄울 수 없다. 앱은 그대로 살려두고
   // 설정 패널에서 설치할 수 있게 안내만 한다.
-  async function bootAgent() {
-    const deps = await checkAll();
-    const missing = deps.filter((d) => !d.ok);
-    const claude = deps.find((d) => d.name === 'claude');
+  const deps = await checkAll();
+  const missing = deps.filter((d) => !d.ok);
+  const claude = deps.find((d) => d.name === 'claude');
 
-    if (!claude.ok) {
-      emit({ type: 'error', text: 'Claude Code 가 없다. 오른쪽 위 ⚙ 에서 설치해라.' });
-      return;
-    }
-    if (missing.length) {
-      note(`설치 안 된 선택 도구: ${missing.map((d) => d.name).join(', ')} — ⚙ 에서 설치 가능`);
-    }
-    await startAgent();
+  if (!claude || !claude.ok) {
+    emit({ type: 'error', text: 'Claude Code 가 없다. 오른쪽 위 ⚙ 에서 설치해라.' });
+    return;
   }
-
-  await bootAgent();
+  if (missing.length) {
+    note(`설치 안 된 선택 도구: ${missing.map((d) => d.name).join(', ')} — ⚙ 에서 설치 가능`);
+  }
+  await startAgent();
 }).catch((e) => console.error('boot failed:', e));
 
 app.on('window-all-closed', () => app.quit());

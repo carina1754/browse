@@ -10,6 +10,16 @@ const { findPlugin } = require('./deps.js');
 
 const HEADROOM_DEFAULT_PORT = 8787;
 
+// headroom 프록시 계열. 반드시 같이 켜지고 같이 꺼진다. BASE_URL 만 지우면
+// CUSTOM_HEADERS 가 남아서, 프록시를 끈 뒤 진짜 api.anthropic.com 으로
+// headroom 의 프로젝트 식별자가 그대로 나간다 (이 머신에서 실제로 확인:
+// ANTHROPIC_CUSTOM_HEADERS = "X-Headroom-Project: browse").
+const PROXY_VARS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_CUSTOM_HEADERS', 'ANTHROPIC_AUTH_TOKEN'];
+
+// 이 앱을 Claude Code 세션 안에서 띄우면 자식이 그 세션의 IPC 소켓과 토큰을
+// 물려받는다. 우리 에이전트는 그 채널을 쓸 일이 없다. 항상 뗀다.
+const SESSION_VARS = /^(CLAUDECODE|CLAUDE_CODE_)/i;
+
 // 프롬프트로 동작하는 모드. headroom 은 프롬프트가 아니라 라우팅이라 여기 없다.
 const PROMPT_MODES = ['caveman', 'ponytail'];
 
@@ -48,7 +58,10 @@ function findSkill(name) {
     }
   })(root, 0);
 
-  hits.sort((a, b) => a.length - b.length);
+  // 문자 길이로 정렬하면 6.9.0 이 6.10.0 을 이긴다. 경로 깊이가 먼저고,
+  // 같은 깊이면 사전순 역순으로 최신 버전 디렉터리를 집는다.
+  const depth = (p) => p.split(path.sep).length;
+  hits.sort((a, b) => depth(a) - depth(b) || b.localeCompare(a));
   return hits[0] ?? null;
 }
 
@@ -58,7 +71,10 @@ function loadModeText(name) {
   try {
     // YAML 프론트매터는 Claude Code 가 스킬을 고르는 데 쓰는 메타데이터다.
     // 시스템 프롬프트에 그대로 넣으면 지시가 아니라 잡음이 된다.
-    return fs.readFileSync(file, 'utf8').replace(/^---[\s\S]*?^---\s*/m, '').trim();
+    const raw = fs.readFileSync(file, 'utf8');
+    // 문서 첫머리에 있을 때만 벗긴다. 앵커 없이 지우면 본문 중간의 --- 수평선을
+    // 만나 그 앞을 통째로 날려버린다.
+    return (raw.startsWith('---') ? raw.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n/, '') : raw).trim();
   } catch {
     return null;
   }
@@ -80,46 +96,97 @@ function loadSettings(file) {
 }
 
 function saveSettings(file, settings) {
+  // 렌더러가 보낸 걸 그대로 믿지 않는다. modes 가 빠진 객체가 들어오면
+  // 나중에 Object.keys(settings.modes) 가 핸들러 안에서 터진다.
+  const clean = {
+    ...DEFAULTS,
+    ...settings,
+    modes: { ...DEFAULTS.modes, ...(settings?.modes ?? {}) },
+  };
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(settings, null, 2));
-  return settings;
+  // 쓰다가 죽으면 다음 부팅에 깨진 JSON 을 만난다. 임시 파일에 쓰고 이름을 바꾼다.
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(clean, null, 2));
+  fs.renameSync(tmp, file);
+  return clean;
 }
 
 function enabled(settings, name) {
   return Boolean(settings?.tokenSaver && settings?.modes?.[name]);
 }
 
+// 켜달라고 한 모드와 실제로 붙은 모드를 같이 돌려준다. SKILL.md 를 못 찾으면
+// 조용히 빠지는데, UI 는 켜졌다고 표시하고 사용자는 아무 동작 변화도 못 본다.
 function buildSystemPrompt(base, settings) {
   const parts = [base];
+  const attached = [];
+  const failed = [];
   for (const name of PROMPT_MODES) {
     if (!enabled(settings, name)) continue;
     const text = loadModeText(name);
-    if (text) parts.push(`# ${name.toUpperCase()} MODE\n\n${text}`);
+    if (text) {
+      parts.push(`# ${name.toUpperCase()} MODE\n\n${text}`);
+      attached.push(name);
+    } else {
+      failed.push(name);
+    }
   }
-  return parts.join('\n\n');
+  return { prompt: parts.join('\n\n'), attached, failed };
+}
+
+// 윈도우의 환경변수 조회는 대소문자를 안 가리지만 {...process.env} 는 평범한
+// 대소문자 구분 객체다. PowerShell 에서 $env:anthropic_base_url 로 넣으면 그
+// 철자 그대로 저장돼서, 정확한 이름만 지우면 살아남는다.
+function pickVar(env, name) {
+  const key = Object.keys(env).find((k) => k.toLowerCase() === name.toLowerCase());
+  return key ? env[key] : undefined;
+}
+
+function deleteVar(env, name) {
+  for (const k of Object.keys(env)) {
+    if (k.toLowerCase() === name.toLowerCase()) delete env[k];
+  }
 }
 
 function headroomUrl(base = process.env) {
-  return base.ANTHROPIC_BASE_URL
-    || `http://127.0.0.1:${base.HEADROOM_PORT || HEADROOM_DEFAULT_PORT}`;
+  return pickVar(base, 'ANTHROPIC_BASE_URL')
+    || `http://127.0.0.1:${pickVar(base, 'HEADROOM_PORT') || HEADROOM_DEFAULT_PORT}`;
 }
 
 function buildEnv(settings, base = process.env) {
   const env = { ...base };
-  if (enabled(settings, 'headroom')) {
-    env.ANTHROPIC_BASE_URL = headroomUrl(base);
-  } else {
-    // 끄는 걸 "안 넣는다"로 처리하면 안 된다. 이 앱을 띄운 셸에 이미
-    // ANTHROPIC_BASE_URL 이 잡혀 있으면 자식이 그대로 물려받아서, 껐는데도
-    // 계속 프록시를 타게 된다. 명시적으로 지운다.
-    delete env.ANTHROPIC_BASE_URL;
+
+  for (const k of Object.keys(env)) {
+    if (SESSION_VARS.test(k)) delete env[k];
+  }
+
+  // 켜든 끄든 일단 계열 전체를 뗀다. 켤 때는 우리가 정한 값 하나만 다시 넣는다 —
+  // 그래야 대소문자가 다른 잔재가 남지 않는다.
+  const url = enabled(settings, 'headroom') ? headroomUrl(base) : null;
+  const keep = url ? { CUSTOM: pickVar(base, 'ANTHROPIC_CUSTOM_HEADERS'), AUTH: pickVar(base, 'ANTHROPIC_AUTH_TOKEN') } : null;
+  for (const v of PROXY_VARS) deleteVar(env, v);
+
+  if (url) {
+    env.ANTHROPIC_BASE_URL = url;
+    if (keep.CUSTOM !== undefined) env.ANTHROPIC_CUSTOM_HEADERS = keep.CUSTOM;
+    if (keep.AUTH !== undefined) env.ANTHROPIC_AUTH_TOKEN = keep.AUTH;
   }
   return env;
 }
 
 // headroom 을 켜기 전에 프록시가 실제로 떠 있는지 본다. 안 떠 있는데 켜면
 // 에이전트의 모든 요청이 죽는데, 증상이 "AI 가 응답을 안 한다"로만 보인다.
-function isHeadroomUp(port = HEADROOM_DEFAULT_PORT, timeout = 700) {
+// 프로브 대상은 실제로 쓸 URL 에서 뽑는다 — 하드코딩한 8787 을 찌르면
+// HEADROOM_PORT 를 바꿔둔 경우 살아 있는 프록시를 죽었다고 판정한다.
+function isHeadroomUp(url = headroomUrl(), timeout = 700) {
+  let host, port;
+  try {
+    const u = new URL(url);
+    host = u.hostname;
+    port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+  } catch {
+    return Promise.resolve(false);
+  }
   return new Promise((resolve) => {
     const sock = new net.Socket();
     const done = (ok) => {
@@ -130,7 +197,7 @@ function isHeadroomUp(port = HEADROOM_DEFAULT_PORT, timeout = 700) {
     sock.once('connect', () => done(true));
     sock.once('timeout', () => done(false));
     sock.once('error', () => done(false));
-    sock.connect(port, '127.0.0.1');
+    sock.connect(port, host);
   });
 }
 

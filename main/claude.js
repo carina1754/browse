@@ -14,8 +14,15 @@ const CLAUDE_BIN = process.platform === 'win32' ? 'claude.exe' : 'claude';
 // 한 겹짜리가 된다. ToolSearch 도 같은 이유 — 우리 에이전트가 쓸 툴은
 // mcp__browser__* 로 이미 명시돼 있어서 탐색이 필요 없다.
 const BLOCKED_TOOLS = [
-  'Bash', 'Edit', 'Write', 'Read', 'PowerShell', 'WebFetch',
-  'Agent', 'Task', 'ToolSearch', 'NotebookEdit',
+  // 파일시스템·셸 직접 접근
+  'Bash', 'BashOutput', 'KillShell', 'PowerShell',
+  'Read', 'Write', 'Edit', 'NotebookEdit', 'Glob', 'Grep',
+  // 네트워크. WebFetch 만 막고 WebSearch 를 두면 반쪽이다.
+  'WebFetch', 'WebSearch',
+  // 위임 경로. test/security.test.js 에서 실제로 관찰됐다 — Write 가 거부되자
+  // 모델이 Agent 로 서브에이전트를 띄워 PowerShell 로 같은 파일을 쓰려 했다.
+  // 이 경로를 열어두면 위 목록 전체가 한 겹짜리가 된다.
+  'Agent', 'Task', 'ToolSearch', 'SlashCommand',
 ];
 
 function buildArgs({ mcpUrl, model, systemPrompt }) {
