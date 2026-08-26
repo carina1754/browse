@@ -7,7 +7,16 @@ const CLAUDE_BIN = process.platform === 'win32' ? 'claude.exe' : 'claude';
 
 // claude.exe 는 기본으로 Bash/Edit/Read/PowerShell 을 들고 있다.
 // 브라우저 어시스턴트에게 파일시스템과 셸 접근은 불필요하고 위험하다.
-const BLOCKED_TOOLS = ['Bash', 'Edit', 'Write', 'Read', 'PowerShell', 'WebFetch'];
+//
+// Agent/Task 를 막는 이유는 나머지와 다르다. test/security.test.js 에서 실제로
+// 관찰된 행동인데, Write 가 거부되자 모델이 Agent 로 서브에이전트를 띄워
+// PowerShell 로 같은 파일을 쓰려 했다. 그 위임 경로를 열어두면 이 목록 전체가
+// 한 겹짜리가 된다. ToolSearch 도 같은 이유 — 우리 에이전트가 쓸 툴은
+// mcp__browser__* 로 이미 명시돼 있어서 탐색이 필요 없다.
+const BLOCKED_TOOLS = [
+  'Bash', 'Edit', 'Write', 'Read', 'PowerShell', 'WebFetch',
+  'Agent', 'Task', 'ToolSearch', 'NotebookEdit',
+];
 
 function buildArgs({ mcpUrl, model, systemPrompt }) {
   const args = [
