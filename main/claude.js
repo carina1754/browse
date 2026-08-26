@@ -3,7 +3,10 @@ const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { StringDecoder } = require('node:string_decoder');
 
-const CLAUDE_BIN = process.platform === 'win32' ? 'claude.exe' : 'claude';
+// bin 을 안 넘겼을 때만 쓰는 기본값. 네이티브 설치를 가정한다.
+// npm -g 로만 깔린 머신에는 claude.cmd 밖에 없고 그건 이대로는 실행되지 않는다 —
+// 그런 머신에서는 main/deps.js 의 claudeBin() 이 푼 {command, args} 를 넘겨야 한다.
+const CLAUDE_BIN = { command: process.platform === 'win32' ? 'claude.exe' : 'claude', args: [] };
 
 // claude.exe 는 기본으로 Bash/Edit/Read/PowerShell 을 들고 있다.
 // 브라우저 어시스턴트에게 파일시스템과 셸 접근은 불필요하고 위험하다.
@@ -48,11 +51,16 @@ function buildArgs({ mcpUrl, model, systemPrompt }) {
   return args;
 }
 
-function createAgent({ cwd, mcpUrl, model, systemPrompt, env, onEvent }) {
+function createAgent({ cwd, mcpUrl, model, systemPrompt, env, bin, onEvent }) {
   // env 를 안 넘기면 node 가 process.env 를 물려준다. 넘기는 쪽(main/modes.js)은
   // 그 상속을 의도적으로 덮어쓰려는 경우다 — headroom 을 껐을 때 셸에 남아 있는
   // ANTHROPIC_BASE_URL 을 지우는 것 같은.
-  const child = spawn(CLAUDE_BIN, buildArgs({ mcpUrl, model, systemPrompt }), {
+  //
+  // shell 은 절대 켜지 않는다. --mcp-config 의 JSON 과 최대 10KB 짜리 시스템
+  // 프롬프트가 인자로 나가는데, cmd.exe 를 거치면 이스케이프도 안 되고 8191자
+  // 제한에도 걸린다. .cmd 는 여기 오기 전에 이미 풀려 있어야 한다.
+  const { command, args: prefix } = bin ?? CLAUDE_BIN;
+  const child = spawn(command, [...prefix, ...buildArgs({ mcpUrl, model, systemPrompt })], {
     cwd,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],

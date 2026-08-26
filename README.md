@@ -224,9 +224,20 @@ npm test            # 유료 API 호출 포함 (agent + security)
 3. **env 조회는 대소문자를 안 가리지만 `{...process.env}` 는 평범한 대소문자 구분
    객체다.** PowerShell 에서 `$env:anthropic_base_url` 로 넣으면 그 철자로 저장돼서
    정확한 이름만 지우면 살아남는다. 실측 확인함. `modes.js` 의 `pickVar`/`deleteVar`.
-4. **`spawn` 은 `.exe` 는 확장자 없이 찾지만 `.cmd` 는 못 찾는다** (PATHEXT 미적용).
-   실측: `spawn('npm', ['--version'])` 이 ENOENT. npm-global 설치는 `claude.cmd` 를
-   남긴다. `shell: bin.endsWith('.cmd')` 로 우회.
+4. **`.cmd` 는 실행할 수 없다. `shell: true` 는 답이 아니다.** npm-global 설치는
+   `claude.cmd` 를 남긴다. 실측한 결과:
+   - 이름만으로 spawn: **ENOENT** (PATHEXT 미적용)
+   - 절대경로를 shell 없이 spawn: **EINVAL** (CreateProcess 가 `.cmd` 를 못 연다)
+   - `shell: true`: 세 개가 한꺼번에 터진다 — 경로에 공백이 있으면
+     `'C:\Program' 은(는) 내부 또는 외부 명령...`, 인자를 이스케이프하지 않고
+     (Node `DEP0190`), cmd.exe 명령줄 8191자 제한에 10KB 시스템 프롬프트가
+     `명령줄이 너무 깁니다` 로 죽는다.
+
+   해결: shim 본문에서 실제 타깃을 꺼내 shell 없이 직접 spawn 한다
+   (`main/deps.js` 의 `unwrapCmdShim` / `toSpawnable`). `.js` 타깃이면 `node` 를 앞에
+   붙이고, `.exe` 타깃이면 그대로 부른다. shim 형태가 `%dp0%` 와 `%~dp0` 두 가지고,
+   구형은 **`node.exe` 가 타깃보다 먼저 나오므로 인터프리터를 걸러내야 한다** —
+   안 그러면 `corepack.cmd` 에서 `corepack.js` 대신 `node.exe` 를 집는다.
 5. **메뉴바가 `getContentBounds()` 에 안 보인다.** 메뉴바는 클라이언트 영역을 약
    21px 밀어내는데 `getContentBounds()` 는 밀리기 전 높이를 보고한다. 그 높이로 뷰를
    깔면 아래 21px 가 화면 밖으로 나가서 채팅 입력칸이 잘린다.
@@ -255,11 +266,12 @@ npm test            # 유료 API 호출 포함 (agent + security)
 
 ## 알려진 구멍
 
-- **`main/claude.js` 는 `claude.exe` 를 하드코딩한다.** `main/deps.js` 는
-  `claude.cmd` 도 후보로 본다. npm-global 로만 깔린 머신에서는 점검은 통과하는데
-  spawn 이 ENOENT 로 죽는다. 다른 머신으로 옮길 때 **가장 먼저 확인할 것**.
-  고치려면 `claudeBin()` 결과를 `createAgent` 로 넘기면 된다.
 - 설치 경로가 end-to-end 로 검증된 적 없다 (이 머신에는 넷 다 이미 있었다).
+- **`.cmd` 해제가 진짜 `claude.cmd` 로는 검증된 적 없다.** 이 머신은 네이티브
+  설치라 `claude.exe` 뿐이다. 해제 로직 자체는 합성 shim 4종과 이 머신의 실제
+  shim 2개(`opencode.cmd` → `.exe` 타깃, `corepack.cmd` → `.js` 타깃)로 검증했지만,
+  풀어낸 `node cli.js` 가 실제로 claude 로 뜨는 건 npm-global 머신에서 확인해야 한다.
+  `⚙` 점검에 `2.1.246 (Claude Code)  (node ...cli.js)` 처럼 실행 형태가 같이 나온다.
 - `findPlugin` 은 마켓플레이스 이름과 플러그인 이름이 같다고 가정한다.
 - `claude plugin install` 이 실패해도 성공으로 보고될 수 있다 (마켓플레이스 clone
   자체에 `SKILL.md` 가 있어서 실질적으로는 무해).

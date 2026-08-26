@@ -9,14 +9,25 @@ const path = require('node:path');
 const WIN = process.platform === 'win32';
 const HOME = os.homedir();
 
-// main/claude.js 와 같은 규칙. 저기서 import 하지 않는 건 deps.js 가
-// claude.exe 가 아직 없을 수도 있는 상황을 다루는 모듈이기 때문이다.
+// 후보가 둘인 이유: 네이티브 설치는 claude.exe 를, npm -g 설치는 claude.cmd 를 남긴다.
 //
-// 후보가 둘인 이유: 네이티브 설치는 claude.exe 를, npm -g 설치는 claude.cmd 를
-// 남긴다. 노드의 spawn 은 윈도우에서 .exe 는 확장자 없이도 찾아내지만 .cmd 는
-// PATHEXT 를 적용하지 않아 shell 없이는 ENOENT 다. 확인함:
-// spawn('npm', ['--version']) -> ENOENT.
+// .cmd 는 그냥 실행할 수 없다. 전부 실측한 결과다:
+//   - 절대경로를 shell 없이 spawn        -> EINVAL (CreateProcess 가 .cmd 를 못 연다)
+//   - 이름만으로 spawn                    -> ENOENT (PATHEXT 미적용)
+//   - shell: true                         -> 세 가지가 동시에 깨진다
+//       1) 경로에 공백이 있으면 실패: "'C:\Program' 은(는) 내부 또는 외부 명령..."
+//       2) 인자를 이스케이프하지 않는다 (node DEP0190). SKILL.md 의 마크다운 표에
+//          들어 있는 | 가 그대로 파이프로 해석된다.
+//       3) cmd.exe 명령줄 8191자 제한. 10KB 시스템 프롬프트가 "명령줄이 너무 깁니다"로 죽는다.
+//
+// 그래서 shell 을 쓰지 않는다. shim 이 실제로 부르는 대상을 꺼내서 직접 spawn 한다.
 const CLAUDE_CANDIDATES = WIN ? ['claude.exe', 'claude.cmd'] : ['claude'];
+
+// 실행 대상은 {command, args} 로 표현한다. .cmd 를 풀면 인터프리터가 앞에 붙어서
+// 이름 하나로는 표현이 안 된다 (node + cli.js).
+const asSpec = (bin) => (typeof bin === 'string' ? { command: bin, args: [] } : bin);
+const specLabel = (spec) => [spec.command, ...spec.args].join(' ');
+
 let resolvedClaude = null;
 
 // 설치 스크립트가 바이너리를 놓는 곳. 윈도우는 환경변수 변경이 이미 실행 중인
@@ -78,8 +89,9 @@ function runShell(script, onOutput) {
     : run('sh', ['-c', script], onOutput);
 }
 
-async function probeVersion(bin, opts) {
-  const { code, out } = await run(bin, ['--version'], null, opts);
+async function probeVersion(bin) {
+  const { command, args } = asSpec(bin);
+  const { code, out } = await run(command, [...args, '--version']);
   return code === 0 ? { ok: true, detail: out.trim().split('\n')[0] } : { ok: false, detail: out.trim() };
 }
 
@@ -93,14 +105,63 @@ function refreshPath() {
   return add;
 }
 
+// npm 의 cmd-shim 이 실제로 실행하는 대상을 꺼낸다. 두 형태가 다 돌아다닌다:
+//   "%dp0%\node_modules\pkg\bin\thing.exe"       (SET dp0=%~dp0 를 먼저 하는 최신 shim)
+//   "%~dp0\node.exe"  "%~dp0\...\thing.js"       (구형)
+// node.exe 는 인터프리터지 대상이 아니다 — 걸러낸다. 안 그러면 corepack.cmd 에서
+// corepack.js 대신 node.exe 를 집는다 (이 머신의 실제 파일로 확인).
+function unwrapCmdShim(cmdPath) {
+  let body;
+  try {
+    body = fs.readFileSync(cmdPath, 'utf8');
+  } catch {
+    return null;
+  }
+  const dir = path.dirname(cmdPath);
+  const re = /"%~?dp0%?[\\/]+([^"\r\n]+?\.(?:js|exe))"/gi;
+  for (const m of body.matchAll(re)) {
+    const rel = m[1];
+    if (path.basename(rel).toLowerCase() === 'node.exe') continue;
+    const target = path.join(dir, rel);
+    if (fs.existsSync(target)) return target;
+  }
+  return null;
+}
+
+// 실행 가능한 {command, args} 로 정규화한다. 풀 수 없는 .cmd 는 null.
+function toSpawnable(binPath) {
+  if (!binPath.toLowerCase().endsWith('.cmd')) return { command: binPath, args: [] };
+
+  const target = unwrapCmdShim(binPath);
+  if (!target) return null;
+  if (!target.toLowerCase().endsWith('.js')) return { command: target, args: [] };
+
+  // shim 과 같은 순서로 node 를 고른다: 옆에 있는 node.exe 가 있으면 그것, 없으면 PATH.
+  const local = path.join(path.dirname(binPath), 'node.exe');
+  return { command: fs.existsSync(local) ? local : 'node', args: [target] };
+}
+
+// 이름만으로는 .cmd 를 풀 수 없다. 실제 경로가 필요하다.
+async function whichAll(name) {
+  const { code, out } = WIN ? await run('where.exe', [name]) : await run('which', ['-a', name]);
+  return code === 0 ? out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [];
+}
+
 // 어떤 claude 를 쓸지 한 번 정해서 기억한다. 없으면 null.
+// 돌려주는 건 이름이 아니라 {command, args} 다 — .cmd 를 풀면 node 가 앞에 붙는다.
 async function claudeBin() {
   if (resolvedClaude) return resolvedClaude;
-  for (const bin of CLAUDE_CANDIDATES) {
-    const { ok } = await probeVersion(bin, { shell: bin.endsWith('.cmd') });
-    if (ok) {
-      resolvedClaude = bin;
-      return bin;
+  for (const name of CLAUDE_CANDIDATES) {
+    // .cmd 가 아니면 spawn 이 PATH 에서 알아서 찾는다. 경로 조회를 건너뛴다.
+    const paths = name.endsWith('.cmd') ? await whichAll(name) : [name];
+    for (const p of paths) {
+      const spec = toSpawnable(p);
+      if (!spec) continue;
+      const { ok } = await probeVersion(spec);
+      if (ok) {
+        resolvedClaude = spec;
+        return spec;
+      }
     }
   }
   return null;
@@ -123,7 +184,9 @@ const DEPS = {
     check: async () => {
       const bin = await claudeBin();
       if (!bin) return { ok: false, detail: '실행 파일을 찾을 수 없다' };
-      return probeVersion(bin, { shell: bin.endsWith('.cmd') });
+      const v = await probeVersion(bin);
+      // 어떻게 실행되는지 보여준다. .cmd 를 푼 경우 node + cli.js 로 나온다.
+      return v.ok ? { ok: true, detail: `${v.detail}  (${specLabel(bin)})` } : v;
     },
     install: (onOutput) => runShell(WIN ? CLAUDE_INSTALL_PS : CLAUDE_INSTALL_SH, onOutput),
   },
@@ -171,11 +234,10 @@ async function installPlugin(name, onOutput) {
   const url = MARKETPLACES[name];
   const bin = await claudeBin();
   if (!bin) return { code: -1, out: 'claude 가 없어서 플러그인을 설치할 수 없다. 먼저 Claude Code 를 설치해라.' };
-  const opts = { shell: bin.endsWith('.cmd') };
-  const added = await run(bin, ['plugin', 'marketplace', 'add', url], onOutput, opts);
+  const added = await run(bin.command, [...bin.args, 'plugin', 'marketplace', 'add', url], onOutput);
   // 이미 등록돼 있으면 실패로 나오지만 그건 문제가 아니다 — 다음 단계가 판정한다.
   if (added.code !== 0 && onOutput) onOutput(`marketplace add 실패(무시하고 진행): ${added.out.trim()}`);
-  return run(bin, ['plugin', 'install', `${name}@${name}`], onOutput, opts);
+  return run(bin.command, [...bin.args, 'plugin', 'install', `${name}@${name}`], onOutput);
 }
 
 async function checkAll() {
@@ -216,4 +278,7 @@ async function install(name, onOutput) {
   return { ok: false, detail: out.trim().slice(-500) || `설치 명령이 ${code} 로 끝났고 재점검도 실패` };
 }
 
-module.exports = { checkAll, install, findPlugin, claudeBin, refreshPath, DEPS, MARKETPLACES };
+module.exports = {
+  checkAll, install, findPlugin, claudeBin, refreshPath, DEPS, MARKETPLACES,
+  unwrapCmdShim, toSpawnable,
+};

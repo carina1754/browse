@@ -9,7 +9,7 @@ const { createWindow } = require('./index.js');
 const { createTools } = require('./tools.js');
 const { startMcpServer } = require('./mcp.js');
 const { createAgent } = require('./claude.js');
-const { checkAll, install } = require('./deps.js');
+const { checkAll, install, claudeBin } = require('./deps.js');
 const {
   loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled,
   isHeadroomUp, headroomUrl,
@@ -63,6 +63,14 @@ app.whenReady().then(async () => {
       agent = null;
     }
 
+    // 이름이 아니라 {command, args} 다. npm -g 설치라 claude.cmd 밖에 없으면
+    // 여기서 node + cli.js 로 풀려서 나온다 (main/deps.js 의 toSpawnable).
+    const bin = await claudeBin();
+    if (!bin) {
+      emit({ type: 'error', text: 'Claude Code 실행 파일을 찾을 수 없다. ⚙ 에서 설치해라.' });
+      return;
+    }
+
     let active = settings;
     if (enabled(settings, 'headroom') && !(await isHeadroomUp())) {
       // 프록시가 없는데 그리로 보내면 모든 요청이 죽는다. 증상은 "AI 가 응답을
@@ -87,6 +95,7 @@ app.whenReady().then(async () => {
       mcpUrl: mcp.url,
       systemPrompt: prompt,
       env: buildEnv(active),
+      bin,
       onEvent: emit,
     });
 
