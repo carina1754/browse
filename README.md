@@ -78,9 +78,12 @@ renderer/toolbar.html)이 뜨고, 대화 탭에서는 숨는다. 새 탭은 `abo
 주소창 입력과 `window.open` URL 은 main 의 같은 스킴 검사(http/https 만, 대소문자
 무시)를 거친다 — 페이지가 file:// 을 숨은 탭에 열고 에이전트 도구가 그 로컬 파일을
 읽는 체인을 막는다.
-- **페이지 탭 UA 에서 Electron/앱 토큰을 뗀다.** 구글이 Electron UA 의 로그인을
-  "안전하지 않은 브라우저"로 거절한다. 쿠키는 기본 세션이라 디스크에 남는다 —
-  한 번 로그인하면 재시작해도 유지된다.
+- **UA 와 Client Hints 를 세션 전체에서 크롬으로 맞춘다** (`main/ua.js`). 구글은
+  Electron 브라우저의 로그인을 "안전하지 않은 브라우저"로 거절하는데, UA 문자열만
+  고치면 안 통한다 — Chromium 이 같이 보내는 `Sec-CH-UA` 브랜드 목록과
+  `Sec-CH-UA-Full-Version-List` 에 "Electron" 이 그대로 남기 때문이다. 탭이 아니라
+  세션에 거는 이유는 페이지가 만드는 하위 요청(iframe, fetch)까지 같은 정체성이어야
+  해서다. 쿠키는 기본 세션이라 디스크에 남는다 — 한 번 로그인하면 재시작해도 유지된다.
 - **비밀번호 금고.** ⚙ 비밀번호에서 저장(DPAPI 암호화, vault.json), 주소창 옆 🔑 로
   채우기. 평문은 main 프로세스 안에서만 산다 — 렌더러는 host/user 목록만 받고,
   채우기는 main 이 활성 페이지 탭에 직접 주입한다. 호스트가 맞을 때만 (서브도메인
@@ -127,6 +130,7 @@ main/app.js      Electron 진입점 (package.json "main"). 부팅 순서와 모�
 main/index.js    createWindow() 만 있는 부작용 없는 모듈. 창 크기 변화를 모든 뷰에 옮긴다.
 main/tabs.js     탭 목록·열기·닫기·전환. 어느 탭이 보이고 에이전트가 어느 탭을 쓰는지.
 main/vault.js    사이트 비밀번호 금고 (safeStorage/DPAPI 암호화, 호스트 매칭, 주입 스크립트).
+main/ua.js       세션 전체 UA + Client Hints 를 크롬으로 맞춘다 (구글 로그인 차단 회피).
 main/claude.js   claude.exe spawn, argv 조립, NDJSON 스트림 파싱, BLOCKED_TOOLS.
 main/tools.js    CDP 브라우저 도구 6개. MCP 도 Electron 창 구조도 모른다.
 main/mcp.js      도구 6개를 MCP 툴로 등록하고 localhost HTTP 로 노출. CDP 를 모른다.

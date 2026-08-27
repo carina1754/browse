@@ -13,6 +13,7 @@ const { clearDir } = require('./workspace.js');
 const { checkAll, install, claudeBin } = require('./deps.js');
 const { authStatus, logout, openLogin, subscriptionUsage } = require('./account.js');
 const { createVault, fillScript } = require('./vault.js');
+const { applyChromeIdentity } = require('./ua.js');
 const {
   loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled,
   isHeadroomUp, headroomUrl,
@@ -31,6 +32,10 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 app.whenReady().then(async () => {
+  // 창을 만들기 전에 걸어야 한다 — app.userAgentFallback 은 이미 만들어진
+  // webContents 에는 안 먹는다.
+  applyChromeIdentity();
+
   const { win, chatView, statusView, toolView, tabs } = createWindow();
 
   // 대화창과 상태 줄에 같이 흘린다. 각자 자기가 아는 것만 그린다 — 대화창은

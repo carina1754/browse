@@ -2,7 +2,7 @@
 // 탭 목록과 각 탭의 뷰. 어떤 탭이 보이는지도 여기서 정한다.
 // 배치(bounds)는 여기서 안 한다 — main/index.js 의 layout() 이 창 크기를 안다.
 // 첫 번째 탭은 AI 대화 탭이고 닫을 수 없다. 나머지는 진짜 웹 페이지다.
-const { WebContentsView, app } = require('electron');
+const { WebContentsView } = require('electron');
 
 const CHAT_ID = 'chat';
 const BLANK = 'about:blank';
@@ -55,11 +55,8 @@ function createTabs({ win, chatView, onChange, onLayout }) {
     view.setVisible(false);
 
     const wc = view.webContents;
-    // 구글은 Electron UA 로 들어온 로그인을 "안전하지 않은 브라우저"라며 막는다.
-    // 크롬처럼 보이도록 Electron/앱 토큰만 뗀다.
-    const appTag = app.getName() + '/';
-    wc.setUserAgent(wc.getUserAgent().split(' ')
-      .filter((t) => !t.startsWith('Electron/') && !t.startsWith(appTag)).join(' '));
+    // UA 와 Client Hints 는 여기서 안 만진다 — main/ua.js 가 세션 전체에 건다.
+    // 탭마다 걸면 페이지가 만드는 하위 요청(iframe, fetch)과 정체성이 어긋난다.
     wc.on('page-title-updated', (_e, title) => { tab.title = title; changed(); });
     wc.on('page-favicon-updated', (_e, icons) => { tab.favicon = icons[0] || ''; changed(); });
     const moved = () => { tab.url = wc.getURL(); changed(); };
