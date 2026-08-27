@@ -156,6 +156,9 @@ function parseLimits(json, now = Date.now()) {
     if (!v || typeof v !== 'object') continue;
     const raw = Number(v.utilization ?? v.used_percent);
     if (!Number.isFinite(raw)) continue;
+    // 아는 한도만 칩으로 만든다. nimbus_quill / extra_usage 같은 내부 키까지
+    // 찍으면 줄만 길어진다 (사용자가 빼달라고 했다).
+    if (!LABELS[key] && !modelOf(key)) continue;
     const used = Math.max(0, Math.min(100, Math.round(raw)));
     const label = LABELS[key] ?? key;
     const resetsAt = v.resets_at ?? v.resetsAt ?? null;

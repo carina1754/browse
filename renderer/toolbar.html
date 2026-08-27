@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8" />
+<!-- 페이지 탭 위에 뜨는 도구 줄. 대화 탭에서는 main/index.js 가 숨긴다.
+     chat.html 과 같은 정책 — IPC 로만 말하고 원격 자원을 안 쓴다.
+     주소창 값은 남의 사이트 URL 이다. textContent/value 로만 다룬다. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'" />
+<title>toolbar</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 12.5px system-ui, sans-serif; }
+  body {
+    display: flex; align-items: center; gap: 4px; padding: 0 10px;
+    background: #1f1f22; color: #aaa; border-bottom: 1px solid #2a2a2c;
+    box-sizing: border-box; user-select: none;
+  }
+  button {
+    flex: 0 0 auto; width: 26px; height: 26px; border: 0; border-radius: 6px;
+    background: none; color: #bbb; font: 14px/1 system-ui, sans-serif; cursor: pointer;
+  }
+  button:hover { background: #303034; color: #fff; }
+  button:disabled { color: #4c4c50; background: none; cursor: default; }
+  #url {
+    flex: 1; min-width: 0; height: 26px; margin-left: 6px; border: 0; border-radius: 13px;
+    background: #2b2b2e; color: #e8e8ea; padding: 0 12px; font: inherit; outline: none;
+  }
+  #url:focus { background: #333338; box-shadow: 0 0 0 1px #4a4a52; }
+  #url::placeholder { color: #77777c; }
+</style>
+<button id="back" title="뒤로">←</button>
+<button id="fwd" title="앞으로">→</button>
+<button id="reload" title="새로고침">↻</button>
+<input id="url" placeholder="검색어 또는 URL 입력" spellcheck="false" />
+<script>
+  const url = document.getElementById('url');
+  const back = document.getElementById('back');
+  const fwd = document.getElementById('fwd');
+
+  const nav = (action, value) => window.api.navTab(action, value).catch(() => {});
+  back.onclick = () => nav('back');
+  fwd.onclick = () => nav('forward');
+  document.getElementById('reload').onclick = () => nav('reload');
+
+  // 스킴이 있으면 그대로, 도메인처럼 생기면 https, 나머지는 구글 검색.
+  // file:// 같은 건 여기서 만들어도 main/tabs.js 의 nav() 가 버린다.
+  function toUrl(t) {
+    if (/^https?:\/\//i.test(t)) return t;
+    if (/^localhost(:\d+)?([/?#]|$)/i.test(t)) return 'http://' + t;
+    if (!/\s/.test(t) && t.includes('.')) return 'https://' + t;
+    return 'https://www.google.com/search?q=' + encodeURIComponent(t);
+  }
+
+  url.onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
+    const t = url.value.trim();
+    if (t) nav('go', toUrl(t));
+  };
+
+  function render(tabs) {
+    const t = tabs.find((x) => x.active && x.closable);
+    if (!t) return; // 대화 탭이 활성이면 이 줄 자체가 숨어 있다
+    back.disabled = !t.canBack;
+    fwd.disabled = !t.canForward;
+    const shown = t.url === 'about:blank' ? '' : t.url;
+    // 치는 중에 did-navigate 가 오면 입력이 날아간다 — 포커스 중엔 안 덮는다.
+    if (document.activeElement !== url) url.value = shown;
+    if (!shown && !url.value) url.focus(); // 빈 새 탭 — 바로 칠 수 있게
+  }
+
+  window.api.onTabs(render);
+  window.api.listTabs().then(render).catch(() => {});
+</script>

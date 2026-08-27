@@ -17,7 +17,9 @@ assert.match(parseAuth('{oops}').error, /JSON/);
 // subscriptionType 이 없으면 authMethod 로 떨어진다
 assert.strictEqual(parseAuth('{"loggedIn":true,"authMethod":"claude.ai"}').plan, 'claude.ai');
 
-// 2. 한도 파싱 — utilization 을 든 객체만 줍고, 남은 %로 뒤집는다
+// 2. 한도 파싱 — utilization 을 든 "아는" 키만 줍고, 남은 %로 뒤집는다.
+// 모르는 키(weird_new_key)는 버린다 — nimbus_quill / extra_usage 같은 내부
+// 한도까지 칩으로 찍으면 줄만 길어진다.
 const limits = parseLimits({
   five_hour: { utilization: 23.4, resets_at: '2026-01-01T00:00:00Z' },
   seven_day: { utilization: 100 },
@@ -26,7 +28,7 @@ const limits = parseLimits({
   something: { unrelated: 1 },
 });
 assert.deepStrictEqual(limits.map((l) => [l.label, l.remaining]), [
-  ['5시간', 77], ['주간', 0], ['weird_new_key', 100],
+  ['5시간', 77], ['주간', 0],
 ]);
 assert.strictEqual(limits[0].resetsAt, '2026-01-01T00:00:00Z');
 
@@ -36,10 +38,13 @@ const chips = parseLimits({
   five_hour: { utilization: 3, resets_at: '2026-01-01T04:09:00Z' },
   seven_day: { utilization: 22, resets_at: '2026-01-05T16:30:00Z' },
   seven_day_opus: { utilization: 3, resets_at: '2026-01-05T16:30:00Z' },
-  no_reset: { utilization: 7 },
+  // 모르는 키는 칩이 안 된다 — nimbus_quill / extra_usage 같은 내부 한도까지
+  // 찍으면 줄만 길어진다.
+  nimbus_quill: { utilization: 0 },
+  extra_usage: { utilization: 0, resets_at: '2026-01-02T00:00:00Z' },
 }, now);
 assert.deepStrictEqual(chips.map((l) => l.text), [
-  '3% 사용 4h 9m', '22% 사용 4d 16h', '3% 사용 Opus', '7% 사용 no_reset',
+  '3% 사용 4h 9m', '22% 사용 4d 16h', '3% 사용 Opus',
 ]);
 // 이미 지난 리셋 시각, 없는 값, 초 단위 epoch 모두 견딘다
 assert.strictEqual(timeLeft('2025-12-31T00:00:00Z', now), '');

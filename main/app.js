@@ -30,7 +30,7 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 app.whenReady().then(async () => {
-  const { win, chatView, statusView, tabs } = createWindow();
+  const { win, chatView, statusView, toolView, tabs } = createWindow();
 
   // 대화창과 상태 줄에 같이 흘린다. 각자 자기가 아는 것만 그린다 — 대화창은
   // text/tool/error, 상태 줄은 usage/modes.
@@ -208,7 +208,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('tabs:list', () => tabs.list());
   ipcMain.handle('tabs:select', (_e, id) => { tabs.select(id); return true; });
   ipcMain.handle('tabs:close', (_e, id) => { tabs.close(id); return true; });
-  ipcMain.handle('tabs:new', () => { tabs.open(); return true; });
+  ipcMain.handle('tabs:new', () => {
+    tabs.open();
+    // 새 탭은 빈 페이지다. 주소창에 바로 칠 수 있게 도구 줄로 포커스를 준다.
+    toolView.webContents.focus();
+    return true;
+  });
+  ipcMain.handle('tabs:nav', (_e, action, url) => { tabs.nav(action, url); return true; });
 
   ipcMain.handle('settings:open', () => {
     openSettingsWindow(win);

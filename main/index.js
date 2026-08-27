@@ -6,6 +6,8 @@ const { createTabs } = require('./tabs.js');
 // 왼쪽 탭 줄, 아래 상태 줄. 상태 줄은 탭 줄까지 덮어서 창 가로를 다 쓴다.
 const TABS_WIDTH = 200;
 const STATUS_HEIGHT = 30;
+// 페이지 탭 위 도구 줄(뒤/앞/새로고침/주소창). 대화 탭에선 숨는다.
+const TOOL_HEIGHT = 38;
 
 // 창 크기가 바뀌는 경로는 'resize' 하나가 아니다. 최대화/복원/전체화면은
 // 플랫폼에 따라 resize 를 안 흘리거나 전환이 끝난 뒤에야 흘린다. 하나라도
@@ -26,7 +28,7 @@ function createWindow() {
 
   const win = new BaseWindow({ width: 1400, height: 900, title: 'AI Browser', backgroundColor: '#1e1e1e' });
 
-  // 우리 UI 세 개는 preload 가 필요하고, 웹 페이지 탭은 필요 없다 (main/tabs.js).
+  // 우리 UI 네 개는 preload 가 필요하고, 웹 페이지 탭은 필요 없다 (main/tabs.js).
   const panel = (file) => {
     const view = new WebContentsView({
       webPreferences: {
@@ -43,12 +45,18 @@ function createWindow() {
   const tabsView = panel('tabs.html');
   const statusView = panel('status.html');
   const chatView = panel('chat.html');
+  const toolView = panel('toolbar.html');
+  // 처음엔 대화 탭이 활성이다 — 도구 줄은 페이지 탭에서만 보인다.
+  toolView.setVisible(false);
 
   const tabs = createTabs({
     win,
     chatView,
     onChange: (l) => {
-      if (!tabsView.webContents.isDestroyed()) tabsView.webContents.send('tabs:changed', l);
+      toolView.setVisible(l.some((t) => t.active && t.closable));
+      for (const v of [tabsView, toolView]) {
+        if (!v.webContents.isDestroyed()) v.webContents.send('tabs:changed', l);
+      }
     },
     onLayout: () => layout(),
   });
@@ -65,8 +73,14 @@ function createWindow() {
     statusView.setBounds({ x: 0, y: bodyHeight, width, height: statusHeight });
     tabsView.setBounds({ x: 0, y: 0, width: tabsWidth, height: bodyHeight });
     // 숨어 있는 탭도 같이 잡아둔다. 안 그러면 전환하는 순간 옛 크기로 번쩍인다.
+    // 대화 탭은 자체 입력칸이 있어서 내용 전체를 쓴다. 페이지 탭은 도구 줄
+    // (주소창) 아래에 붙는다.
     const content = { x: tabsWidth, y: 0, width: Math.max(0, width - tabsWidth), height: bodyHeight };
-    for (const v of tabs.views()) v.setBounds(content);
+    chatView.setBounds(content);
+    const toolHeight = Math.min(TOOL_HEIGHT, bodyHeight);
+    toolView.setBounds({ x: tabsWidth, y: 0, width: content.width, height: toolHeight });
+    const page = { x: tabsWidth, y: toolHeight, width: content.width, height: Math.max(0, bodyHeight - toolHeight) };
+    for (const v of tabs.views()) if (v !== chatView) v.setBounds(page);
   }
   layout();
   for (const e of RELAYOUT_EVENTS) win.on(e, layout);
@@ -76,7 +90,7 @@ function createWindow() {
   screen.on('display-metrics-changed', layout);
   win.on('closed', () => screen.removeListener('display-metrics-changed', layout));
 
-  return { win, chatView, statusView, tabsView, tabs };
+  return { win, chatView, statusView, tabsView, toolView, tabs };
 }
 
 // 설정은 채팅 사이드바 안이 아니라 별도 창이다. 항목이 계속 늘어날 자리라
@@ -110,4 +124,4 @@ function openSettingsWindow(parent) {
   return settingsWin;
 }
 
-module.exports = { createWindow, openSettingsWindow, TABS_WIDTH, STATUS_HEIGHT, RELAYOUT_EVENTS };
+module.exports = { createWindow, openSettingsWindow, TABS_WIDTH, STATUS_HEIGHT, TOOL_HEIGHT, RELAYOUT_EVENTS };

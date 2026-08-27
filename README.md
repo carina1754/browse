@@ -1,8 +1,8 @@
 # AI Browser
 
 AI 어시스턴트가 내장된 윈도우 데스크톱 브라우저. 사람이 주소창을 치는 대신
-**에이전트가 페이지를 직접 조작**한다. 탭도 북마크도 주소창도 없다 — 왼쪽은 채팅,
-오른쪽은 에이전트가 운전하는 페이지 하나. (BrowserOS 를 참고했지만 코드는 공유하지 않는다.)
+**에이전트가 페이지를 직접 조작**한다. 왼쪽은 탭 줄, 첫 탭이 AI 채팅이고 나머지는
+진짜 페이지 탭(주소창 포함)이다. (BrowserOS 를 참고했지만 코드는 공유하지 않는다.)
 
 에이전트 본체는 직접 짠 agent loop 이 아니라 **`claude.exe` 를 백그라운드 프로세스로
 띄운 것**이다. 우리는 브라우저 도구만 만들어서 MCP 로 넘겨준다.
@@ -43,6 +43,7 @@ npm start
 BaseWindow
 ├── tabsView    (WebContentsView, 왼쪽 200px, renderer/tabs.html + preload)
 ├── statusView  (WebContentsView, 맨 아래 30px, 창 가로 전체, renderer/status.html + preload)
+├── toolView    (WebContentsView, 페이지 탭 위 38px — 뒤/앞/새로고침/주소창. 대화 탭에선 숨김)
 └── 탭 내용      (남는 사각형. 한 번에 하나만 보인다 — main/tabs.js)
     ├── chatView   (renderer/chat.html + preload)  목록 맨 위, 닫을 수 없다
     └── 페이지 탭   (WebContentsView, preload 없음 — 에이전트가 운전하는 진짜 웹페이지)
@@ -71,8 +72,12 @@ main/app.js  ── IPC ──> chatView(대화) / statusView(사용량) / tabsV
 
 ### 탭 (`main/tabs.js`)
 
-왼쪽 줄이 탭 목록이다. 주소창은 없다 — 새 탭은 `about:blank` 으로 열리고
-에이전트가 `navigate` 로 몬다.
+왼쪽 줄이 탭 목록이다. 페이지 탭 위에는 도구 줄(뒤로/앞으로/새로고침/주소창,
+renderer/toolbar.html)이 뜨고, 대화 탭에서는 숨는다. 새 탭은 `about:blank` 으로
+열리고 주소창에 포커스가 온다 — 사람이 치거나 에이전트가 `navigate` 로 몬다.
+주소창 입력과 `window.open` URL 은 main 의 같은 스킴 검사(http/https 만, 대소문자
+무시)를 거친다 — 페이지가 file:// 을 숨은 탭에 열고 에이전트 도구가 그 로컬 파일을
+읽는 체인을 막는다.
 
 - **맨 위 "AI 대화" 탭은 닫을 수 없다.** 이 탭이 사라지면 앱과 말할 방법이 없다.
 - **`window.open` / `target=_blank` 은 새 탭이 된다.** 핸들러에서 `deny` 를 안 하면
@@ -125,6 +130,7 @@ main/preload.js  contextBridge 로 window.api 노출.
 renderer/chat.html  채팅 UI 만. innerHTML 안 쓴다 — 전부 textContent.
 renderer/tabs.html  왼쪽 탭 줄. 제목·파비콘은 남의 사이트가 정한다 — textContent, img-src 만 열어둠.
 renderer/status.html 맨 아래 상태 줄 — ⚙, 이번 세션이 태운 토큰·비용, 구독 한도 칩, 새로고침(↻).
+renderer/toolbar.html 페이지 탭 위 도구 줄 — 뒤/앞/새로고침/주소창. URL 검증은 main 이 한다.
 renderer/settings.html 설정 창 — 계정(로그아웃/로그인)과 토큰 절약. 같은 preload, 같은 CSP, 같은 textContent 규칙.
 test/            아래 테스트 절 참고
 spike/           동결된 게이트 산출물. import 하지도 고치지도 말 것.
@@ -338,7 +344,7 @@ npm test            # 유료 API 호출 포함 (agent + security)
   shim 2개(`opencode.cmd` → `.exe` 타깃, `corepack.cmd` → `.js` 타깃)로 검증했지만,
   풀어낸 `node cli.js` 가 실제로 claude 로 뜨는 건 npm-global 머신에서 확인해야 한다.
   `⚙` 점검에 `2.1.246 (Claude Code)  (node ...cli.js)` 처럼 실행 형태가 같이 나온다.
-- renderer 네 개(chat/tabs/status/settings)의 CSP 는 `default-src 'none'` 에 스크립트/스타일만
+- renderer 다섯(chat/tabs/status/toolbar/settings)의 CSP 는 `default-src 'none'` 에 스크립트/스타일만
   `'unsafe-inline'` 이다. tabs.html 만 `img-src` 를 연다 — 파비콘이 남의 도메인에서 온다.
   인라인이라 어쩔 수 없다 — 그래서 화면에 넣는 에이전트 텍스트는 `textContent` 로만
   넣어야 한다. `innerHTML` 을 쓰는 순간 이 정책은 못 막는다.

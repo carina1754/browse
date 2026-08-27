@@ -6,11 +6,11 @@ const { app } = require('electron');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 app.whenReady().then(async () => {
-  const { createWindow, openSettingsWindow, TABS_WIDTH, STATUS_HEIGHT } = require('../main/index.js');
-  const { win, chatView, statusView, tabsView, tabs } = createWindow();
+  const { createWindow, openSettingsWindow, TABS_WIDTH, STATUS_HEIGHT, TOOL_HEIGHT } = require('../main/index.js');
+  const { win, chatView, statusView, tabsView, toolView, tabs } = createWindow();
 
-  // 탭 줄 + 상태 줄 + 대화 탭.
-  assert.strictEqual(win.contentView.children.length, 3, 'expected 3 child views at start');
+  // 탭 줄 + 상태 줄 + 도구 줄 + 대화 탭.
+  assert.strictEqual(win.contentView.children.length, 4, 'expected 4 child views at start');
 
   // 세 영역이 창을 정확히 덮는다. 창 크기가 바뀌는 경로마다 다시 확인한다 —
   // 'resize' 만 걸려 있던 시절엔 최대화/전체화면에서 옛 크기로 남았다.
@@ -44,6 +44,19 @@ app.whenReady().then(async () => {
       },
       `${tag}: tab content must fill what is left`,
     );
+
+    // 도구 줄(주소창)은 탭 내용 맨 위에 얹힌다.
+    const tool = toolView.getBounds();
+    assert.deepStrictEqual(
+      { x: tool.x, y: tool.y, width: tool.width, height: tool.height },
+      {
+        x: stripWidth,
+        y: 0,
+        width: Math.max(0, content.width - stripWidth),
+        height: Math.min(TOOL_HEIGHT, content.height - statusHeight),
+      },
+      `${tag}: toolbar must sit on top of the tab content`,
+    );
   };
 
   fits('start');
@@ -61,14 +74,42 @@ app.whenReady().then(async () => {
   win.setContentSize(1000, 700); await wait(300);
 
   // --- 탭 -------------------------------------------------------------------
+  assert.strictEqual(toolView.getVisible(), false, '대화 탭인데 도구 줄이 보인다');
   const opened = tabs.open('about:blank');
   assert.strictEqual(tabs.list().length, 2, '새 탭이 목록에 없다');
   assert.ok(tabs.list()[1].active, '새로 연 탭이 활성이어야 한다');
   assert.ok(!tabs.list()[0].closable, '대화 탭은 닫을 수 없어야 한다');
   fits('after open');
 
+  // 도구 줄은 페이지 탭에서만 보이고, 페이지는 도구 줄 아래에 붙는다.
+  assert.strictEqual(toolView.getVisible(), true, '페이지 탭인데 도구 줄이 안 보인다');
+  const tb = toolView.getBounds();
+  const pb = opened.view.getBounds();
+  assert.strictEqual(pb.y, tb.y + tb.height, '페이지가 도구 줄 아래에 안 붙었다');
+  assert.strictEqual(pb.height + tb.height, chatView.getBounds().height, '도구 줄 + 페이지 높이가 대화 탭 높이와 다르다');
+
+  // 주소창 입력은 http/https 만 탄다. file:// 로 로컬 디스크를 열면 안 된다.
+  tabs.nav('go', 'file:///C:/Windows/win.ini');
+  await wait(300);
+  assert.ok(!opened.view.webContents.getURL().startsWith('file:'), 'nav() 가 file:// 를 태웠다');
+  tabs.nav('back'); tabs.nav('forward'); tabs.nav('reload'); // 히스토리 없어도 안 죽는다
+  assert.strictEqual(tabs.list()[1].canBack, false, '히스토리 없는 탭이 canBack=true 다');
+
+  // window.open 도 같은 스킴 검사를 거친다 — file:// 은 탭조차 안 생긴다.
+  // (스킴은 대소문자 무시. 로드 실패는 상관없다 — 탭은 만들어진다.)
+  await opened.view.webContents.executeJavaScript("window.open('file:///C:/Windows/win.ini')", true);
+  await wait(300);
+  assert.strictEqual(tabs.list().length, 2, 'window.open(file://) 이 탭을 만들었다');
+  await opened.view.webContents.executeJavaScript("window.open('HTTPS://example.invalid/')", true);
+  await wait(300);
+  assert.strictEqual(tabs.list().length, 3, '대문자 스킴 window.open 이 탭이 안 됐다');
+  tabs.close(tabs.list()[2].id);
+
   tabs.select('chat');
   assert.ok(tabs.list()[0].active, '대화 탭으로 못 돌아왔다');
+  assert.strictEqual(toolView.getVisible(), false, '대화 탭으로 돌아왔는데 도구 줄이 남아 있다');
+  tabs.nav('go', 'https://example.com'); // 대화 탭에선 아무 일도 안 일어나야 한다
+  assert.ok(chatView.webContents.getURL().endsWith('chat.html'), '대화 탭에서 nav() 가 먹혔다');
 
   tabs.close('chat');
   assert.strictEqual(tabs.list().length, 2, '대화 탭이 닫혔다');

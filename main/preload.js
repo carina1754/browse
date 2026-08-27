@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   selectTab: (id) => ipcRenderer.invoke('tabs:select', id),
   closeTab: (id) => ipcRenderer.invoke('tabs:close', id),
   newTab: () => ipcRenderer.invoke('tabs:new'),
+  navTab: (action, url) => ipcRenderer.invoke('tabs:nav', action, url),
   onTabs: (cb) => ipcRenderer.on('tabs:changed', (_e, list) => cb(list)),
 
   openSettings: () => ipcRenderer.invoke('settings:open'),
