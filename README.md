@@ -41,14 +41,17 @@ npm start
 
 ```
 BaseWindow
-├── chatView  (WebContentsView, 380px, renderer/chat.html + preload)
-└── pageView  (WebContentsView, 나머지 — 에이전트가 운전하는 진짜 웹페이지)
+├── tabsView    (WebContentsView, 왼쪽 200px, renderer/tabs.html + preload)
+├── statusView  (WebContentsView, 맨 아래 30px, 창 가로 전체, renderer/status.html + preload)
+└── 탭 내용      (남는 사각형. 한 번에 하나만 보인다 — main/tabs.js)
+    ├── chatView   (renderer/chat.html + preload)  목록 맨 위, 닫을 수 없다
+    └── 페이지 탭   (WebContentsView, preload 없음 — 에이전트가 운전하는 진짜 웹페이지)
 
 BrowserWindow (별도 창, renderer/settings.html + 같은 preload)  ⚙ 를 눌러야 뜬다
 
-main/app.js  ── IPC ──> chatView
+main/app.js  ── IPC ──> chatView(대화) / statusView(사용량) / tabsView(탭 목록)
      │
-     ├── createTools(pageView.webContents)   CDP (webContents.debugger, in-process)
+     ├── createTools(() => tabs.pageContents())   CDP (webContents.debugger, in-process)
      │        │
      │        └── startMcpServer(tools)      127.0.0.1:<random>/mcp   서버 이름: browser
      │                    ▲
@@ -65,6 +68,21 @@ main/app.js  ── IPC ──> chatView
    접근성 노드라 레이아웃이 흔들려도 안 깨진다.
 3. **`claude.exe` 는 한 번 띄우고 stdin 을 계속 열어둔다.** 턴마다 재시작하면
    대화가 초기화된다. `stream-json` 을 양방향으로 쓴다.
+
+### 탭 (`main/tabs.js`)
+
+왼쪽 줄이 탭 목록이다. 주소창은 없다 — 새 탭은 `about:blank` 으로 열리고
+에이전트가 `navigate` 로 몬다.
+
+- **맨 위 "AI 대화" 탭은 닫을 수 없다.** 이 탭이 사라지면 앱과 말할 방법이 없다.
+- **`window.open` / `target=_blank` 은 새 탭이 된다.** 핸들러에서 `deny` 를 안 하면
+  Electron 이 우리가 추적 못 하는 `BrowserWindow` 를 하나 띄운다.
+- **에이전트는 "마지막으로 쓴 페이지 탭"에서 돈다** (`pageContents()`). 페이지 탭이
+  하나도 없으면 조용히 하나 만든다 — 사용자가 대화창을 보는 중에 화면을 뺏지 않으려고
+  보이는 탭은 안 바꾼다. 그래서 에이전트가 이동해도 자동으로 그 탭이 켜지지 않는다.
+- **CDP 는 탭마다 따로 붙는다.** `createTools` 가 받는 건 webContents 가 아니라
+  `() => webContents` 다. `backendNodeId` 는 문서마다 따로 매겨지므로 다른 탭에서 뜬
+  스냅샷의 ref 는 stale 로 거절한다.
 
 ### 브라우저 도구 6개
 
@@ -94,7 +112,8 @@ main/app.js  ── IPC ──> chatView
 
 ```
 main/app.js      Electron 진입점 (package.json "main"). 부팅 순서와 모든 IPC 핸들러.
-main/index.js    createWindow() 만 있는 부작용 없는 모듈. 창 크기 변화를 뷰 두 개에 옮긴다.
+main/index.js    createWindow() 만 있는 부작용 없는 모듈. 창 크기 변화를 모든 뷰에 옮긴다.
+main/tabs.js     탭 목록·열기·닫기·전환. 어느 탭이 보이고 에이전트가 어느 탭을 쓰는지.
 main/claude.js   claude.exe spawn, argv 조립, NDJSON 스트림 파싱, BLOCKED_TOOLS.
 main/tools.js    CDP 브라우저 도구 6개. MCP 도 Electron 창 구조도 모른다.
 main/mcp.js      도구 6개를 MCP 툴로 등록하고 localhost HTTP 로 노출. CDP 를 모른다.
@@ -103,7 +122,9 @@ main/modes.js    토큰 절약 모드. 시스템 프롬프트 조립 + 자식 en
 main/account.js  계정 조회/로그아웃/로그인(claude auth *)과 구독 한도 잔여량. electron 을 require 하지 않는다.
 main/workspace.js 에이전트 작업 디렉터리 비우기. 경로 안전장치 포함. electron 을 require 하지 않는다.
 main/preload.js  contextBridge 로 window.api 노출.
-renderer/chat.html  채팅 UI + 맨 아래 상태 줄(이번 세션이 태운 토큰·비용, ⚙). innerHTML 안 쓴다 — 전부 textContent.
+renderer/chat.html  채팅 UI 만. innerHTML 안 쓴다 — 전부 textContent.
+renderer/tabs.html  왼쪽 탭 줄. 제목·파비콘은 남의 사이트가 정한다 — textContent, img-src 만 열어둠.
+renderer/status.html 맨 아래 상태 줄 — ⚙, 이번 세션이 태운 토큰·비용, 구독 한도 칩, 새로고침(↻).
 renderer/settings.html 설정 창 — 계정(로그아웃/로그인)과 토큰 절약. 같은 preload, 같은 CSP, 같은 textContent 규칙.
 test/            아래 테스트 절 참고
 spike/           동결된 게이트 산출물. import 하지도 고치지도 말 것.
@@ -213,8 +234,9 @@ true. **기본값은 전부 꺼짐**이다. 설정은 `app.getPath('userData')/s
   아래뿐이고, 경로 모양이 다르면 아무것도 안 지운다. 심볼릭 링크는 링크만 지운다.
 - 자식 env 에서 `CLAUDECODE*` / `CLAUDE_CODE_*` 를 **무조건** 뗀다. 이 앱을 Claude
   Code 세션 안에서 띄우면 자식이 그 세션의 IPC 소켓과 토큰을 물려받는다.
-- renderer 는 `contextIsolation: true`, `nodeIntegration: false`. chat.html 과
-  settings.html 은 `innerHTML` 을 쓰지 않는다 — 에이전트가 가져온 페이지 텍스트가 UI 로 그대로 들어오므로.
+- renderer 는 `contextIsolation: true`, `nodeIntegration: false`. chat/tabs/status/settings
+  넷 다 `innerHTML` 을 쓰지 않는다 — 에이전트가 가져온 페이지 텍스트와 남의 사이트가 정한
+  탭 제목이 UI 로 그대로 들어오므로.
 
 env 는 **denylist** 다 (allowlist 아님). 리뷰에서 allowlist 를 권고받았지만 기각했다 —
 `claude.exe` 가 인증에 필요한 env 를 전부 열거하려다 하나 빠뜨리면 OAuth 가 조용히
@@ -316,7 +338,8 @@ npm test            # 유료 API 호출 포함 (agent + security)
   shim 2개(`opencode.cmd` → `.exe` 타깃, `corepack.cmd` → `.js` 타깃)로 검증했지만,
   풀어낸 `node cli.js` 가 실제로 claude 로 뜨는 건 npm-global 머신에서 확인해야 한다.
   `⚙` 점검에 `2.1.246 (Claude Code)  (node ...cli.js)` 처럼 실행 형태가 같이 나온다.
-- chat.html / settings.html 의 CSP 는 `default-src 'none'` 에 스크립트/스타일만 `'unsafe-inline'` 이다.
+- renderer 네 개(chat/tabs/status/settings)의 CSP 는 `default-src 'none'` 에 스크립트/스타일만
+  `'unsafe-inline'` 이다. tabs.html 만 `img-src` 를 연다 — 파비콘이 남의 도메인에서 온다.
   인라인이라 어쩔 수 없다 — 그래서 화면에 넣는 에이전트 텍스트는 `textContent` 로만
   넣어야 한다. `innerHTML` 을 쓰는 순간 이 정책은 못 막는다.
 - `click()` 은 좌표를 못 구하는 요소(화면 밖, 크기 0, 렌더링 안 됨)에서만 JS 클릭으로

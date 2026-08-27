@@ -30,11 +30,13 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 app.whenReady().then(async () => {
-  const { win, chatView, pageView } = createWindow();
+  const { win, chatView, statusView, tabs } = createWindow();
 
+  // 대화창과 상태 줄에 같이 흘린다. 각자 자기가 아는 것만 그린다 — 대화창은
+  // text/tool/error, 상태 줄은 usage/modes.
   const emit = (evt) => {
-    if (!chatView.webContents.isDestroyed()) {
-      chatView.webContents.send('chat:event', evt);
+    for (const view of [chatView, statusView]) {
+      if (!view.webContents.isDestroyed()) view.webContents.send('chat:event', evt);
     }
   };
   const note = (text) => emit({ type: 'tool', text });
@@ -203,6 +205,11 @@ app.whenReady().then(async () => {
     return openLogin(bin);
   });
 
+  ipcMain.handle('tabs:list', () => tabs.list());
+  ipcMain.handle('tabs:select', (_e, id) => { tabs.select(id); return true; });
+  ipcMain.handle('tabs:close', (_e, id) => { tabs.close(id); return true; });
+  ipcMain.handle('tabs:new', () => { tabs.open(); return true; });
+
   ipcMain.handle('settings:open', () => {
     openSettingsWindow(win);
     return true; // 창 객체는 IPC 로 못 넘긴다
@@ -226,7 +233,8 @@ app.whenReady().then(async () => {
   });
 
   try {
-    const tools = await createTools(pageView.webContents);
+    // 도구는 "지금 에이전트가 쓰는 페이지 탭"에 붙는다. 탭이 없으면 만든다.
+    const tools = await createTools(() => tabs.pageContents());
     mcp = await startMcpServer(tools);
   } catch (e) {
     bootError = e.message;

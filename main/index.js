@@ -1,8 +1,11 @@
 // main/index.js
 const path = require('node:path');
 const { BaseWindow, BrowserWindow, WebContentsView, Menu, screen } = require('electron');
+const { createTabs } = require('./tabs.js');
 
-const CHAT_WIDTH = 380;
+// 왼쪽 탭 줄, 아래 상태 줄. 상태 줄은 탭 줄까지 덮어서 창 가로를 다 쓴다.
+const TABS_WIDTH = 200;
+const STATUS_HEIGHT = 30;
 
 // 창 크기가 바뀌는 경로는 'resize' 하나가 아니다. 최대화/복원/전체화면은
 // 플랫폼에 따라 resize 를 안 흘리거나 전환이 끝난 뒤에야 흘린다. 하나라도
@@ -21,28 +24,49 @@ function createWindow() {
   //    그 높이로 뷰를 깔면 아래쪽 21px 가 화면 밖으로 나가서 채팅 입력칸이 잘린다.
   Menu.setApplicationMenu(null);
 
-  const win = new BaseWindow({ width: 1400, height: 900, title: 'AI Browser' });
+  const win = new BaseWindow({ width: 1400, height: 900, title: 'AI Browser', backgroundColor: '#1e1e1e' });
 
-  const chatView = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
+  // 우리 UI 세 개는 preload 가 필요하고, 웹 페이지 탭은 필요 없다 (main/tabs.js).
+  const panel = (file) => {
+    const view = new WebContentsView({
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    win.contentView.addChildView(view);
+    view.webContents.loadFile(path.join(__dirname, '..', 'renderer', file));
+    return view;
+  };
+
+  const tabsView = panel('tabs.html');
+  const statusView = panel('status.html');
+  const chatView = panel('chat.html');
+
+  const tabs = createTabs({
+    win,
+    chatView,
+    onChange: (l) => {
+      if (!tabsView.webContents.isDestroyed()) tabsView.webContents.send('tabs:changed', l);
     },
+    onLayout: () => layout(),
   });
-  const pageView = new WebContentsView();
-
-  win.contentView.addChildView(chatView);
-  win.contentView.addChildView(pageView);
 
   function layout() {
     if (win.isDestroyed()) return;
     const { width, height } = win.getContentBounds();
-    // 창을 380px 보다 좁게 줄이면 페이지 폭이 음수가 된다. 음수 bounds 는
-    // 뷰를 창 밖으로 밀어낸다 — 그때는 채팅만 보여주고 페이지를 접는다.
-    const chatWidth = Math.min(CHAT_WIDTH, width);
-    chatView.setBounds({ x: 0, y: 0, width: chatWidth, height });
-    pageView.setBounds({ x: chatWidth, y: 0, width: Math.max(0, width - chatWidth), height });
+    // 상태 줄은 맨 아래 가로 전체. 탭 줄은 그 위 왼쪽. 남는 사각형이 탭 내용이다.
+    const statusHeight = Math.min(STATUS_HEIGHT, height);
+    const bodyHeight = height - statusHeight;
+    // 창을 탭 줄보다 좁게 줄이면 내용 폭이 음수가 된다. 음수 bounds 는 뷰를
+    // 창 밖으로 밀어낸다 — 그때는 탭 줄만 보여주고 내용을 접는다.
+    const tabsWidth = Math.min(TABS_WIDTH, width);
+    statusView.setBounds({ x: 0, y: bodyHeight, width, height: statusHeight });
+    tabsView.setBounds({ x: 0, y: 0, width: tabsWidth, height: bodyHeight });
+    // 숨어 있는 탭도 같이 잡아둔다. 안 그러면 전환하는 순간 옛 크기로 번쩍인다.
+    const content = { x: tabsWidth, y: 0, width: Math.max(0, width - tabsWidth), height: bodyHeight };
+    for (const v of tabs.views()) v.setBounds(content);
   }
   layout();
   for (const e of RELAYOUT_EVENTS) win.on(e, layout);
@@ -52,9 +76,7 @@ function createWindow() {
   screen.on('display-metrics-changed', layout);
   win.on('closed', () => screen.removeListener('display-metrics-changed', layout));
 
-  chatView.webContents.loadFile(path.join(__dirname, '..', 'renderer', 'chat.html'));
-
-  return { win, chatView, pageView };
+  return { win, chatView, statusView, tabsView, tabs };
 }
 
 // 설정은 채팅 사이드바 안이 아니라 별도 창이다. 항목이 계속 늘어날 자리라
@@ -88,4 +110,4 @@ function openSettingsWindow(parent) {
   return settingsWin;
 }
 
-module.exports = { createWindow, openSettingsWindow, CHAT_WIDTH, RELAYOUT_EVENTS };
+module.exports = { createWindow, openSettingsWindow, TABS_WIDTH, STATUS_HEIGHT, RELAYOUT_EVENTS };

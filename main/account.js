@@ -22,6 +22,8 @@ const LABELS = {
   seven_day_opus: '주간 Opus',
   seven_day_sonnet: '주간 Sonnet',
 };
+// 모델별 한도는 리셋 시각 대신 모델 이름을 보여준다 (하단 줄 칩).
+const MODELS = ['Opus', 'Sonnet', 'Haiku', 'Fable'];
 
 // claude 를 한 번 돌리고 {code, out} 을 돌려준다. 절대 reject 하지 않는다 —
 // "로그인이 안 돼 있다"는 정상적인 결과지 예외가 아니다.
@@ -126,20 +128,46 @@ function findToken(node, depth = 0) {
   return null;
 }
 
-// 응답에서 "한도" 로 보이는 것만 골라낸다. utilization 은 쓴 비율(%)이라
-// 남은 비율은 100 에서 뺀다.
-function parseLimits(json) {
+// 리셋까지 남은 시간. "4d 16h" / "4h 9m" / "9m". 이미 지났거나 값이 없으면 ''.
+function timeLeft(resetsAt, now = Date.now()) {
+  const at = typeof resetsAt === 'number'
+    ? (resetsAt > 1e12 ? resetsAt : resetsAt * 1000) // 초 단위로 오는 경우
+    : Date.parse(resetsAt);
+  const ms = at - now;
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const min = Math.floor(ms / 60000);
+  const hour = Math.floor(min / 60);
+  const day = Math.floor(hour / 24);
+  if (day) return `${day}d ${hour % 24}h`;
+  if (hour) return `${hour}h ${min % 60}m`;
+  return `${min}m`;
+}
+
+function modelOf(key) {
+  return MODELS.find((m) => key.toLowerCase().includes(m.toLowerCase())) ?? '';
+}
+
+// 응답에서 "한도" 로 보이는 것만 골라낸다. utilization 은 쓴 비율(%)이다.
+// text 는 하단 줄에 그대로 찍는 칩 문구 — 렌더러에서 다시 조립하지 않는다.
+function parseLimits(json, now = Date.now()) {
   const out = [];
   if (!json || typeof json !== 'object') return out;
   for (const [key, v] of Object.entries(json)) {
     if (!v || typeof v !== 'object') continue;
-    const used = Number(v.utilization ?? v.used_percent);
-    if (!Number.isFinite(used)) continue;
+    const raw = Number(v.utilization ?? v.used_percent);
+    if (!Number.isFinite(raw)) continue;
+    const used = Math.max(0, Math.min(100, Math.round(raw)));
+    const label = LABELS[key] ?? key;
+    const resetsAt = v.resets_at ?? v.resetsAt ?? null;
+    // 모델별 한도면 모델 이름, 아니면 리셋까지 남은 시간. 둘 다 없으면 라벨.
+    const tail = modelOf(key) || timeLeft(resetsAt, now) || label;
     out.push({
       key,
-      label: LABELS[key] ?? key,
-      remaining: Math.max(0, Math.min(100, Math.round(100 - used))),
-      resetsAt: v.resets_at ?? v.resetsAt ?? null,
+      label,
+      used,
+      remaining: 100 - used,
+      resetsAt,
+      text: `${used}% 사용 ${tail}`,
     });
   }
   return out;
@@ -175,4 +203,7 @@ async function subscriptionUsage(fetchImpl = fetch, file = CREDENTIALS) {
   return { limits };
 }
 
-module.exports = { authStatus, logout, openLogin, subscriptionUsage, parseAuth, parseLimits, readToken, USAGE_URL };
+module.exports = {
+  authStatus, logout, openLogin, subscriptionUsage,
+  parseAuth, parseLimits, timeLeft, readToken, USAGE_URL,
+};

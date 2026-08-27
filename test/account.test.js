@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { parseAuth, parseLimits, readToken, subscriptionUsage, USAGE_URL } = require('../main/account.js');
+const { parseAuth, parseLimits, timeLeft, readToken, subscriptionUsage, USAGE_URL } = require('../main/account.js');
 
 // 1. auth status 파싱
 const ok = parseAuth('{"loggedIn":true,"email":"a@b.c","subscriptionType":"max","orgName":"Org"}');
@@ -29,6 +29,24 @@ assert.deepStrictEqual(limits.map((l) => [l.label, l.remaining]), [
   ['5시간', 77], ['주간', 0], ['weird_new_key', 100],
 ]);
 assert.strictEqual(limits[0].resetsAt, '2026-01-01T00:00:00Z');
+
+// 하단 줄 칩 문구. 리셋까지 남은 시간을 붙이고, 모델별 한도는 모델 이름을 붙인다.
+const now = Date.parse('2026-01-01T00:00:00Z');
+const chips = parseLimits({
+  five_hour: { utilization: 3, resets_at: '2026-01-01T04:09:00Z' },
+  seven_day: { utilization: 22, resets_at: '2026-01-05T16:30:00Z' },
+  seven_day_opus: { utilization: 3, resets_at: '2026-01-05T16:30:00Z' },
+  no_reset: { utilization: 7 },
+}, now);
+assert.deepStrictEqual(chips.map((l) => l.text), [
+  '3% 사용 4h 9m', '22% 사용 4d 16h', '3% 사용 Opus', '7% 사용 no_reset',
+]);
+// 이미 지난 리셋 시각, 없는 값, 초 단위 epoch 모두 견딘다
+assert.strictEqual(timeLeft('2025-12-31T00:00:00Z', now), '');
+assert.strictEqual(timeLeft(null, now), '');
+assert.strictEqual(timeLeft(undefined, now), '');
+assert.strictEqual(timeLeft(now / 1000 + 3600, now), '1h 0m');
+assert.strictEqual(timeLeft(now + 90000, now), '1m');
 assert.deepStrictEqual(parseLimits(null), []);
 // 한도를 넘겨 써서 utilization 이 100 을 넘어도 음수 %를 보여주지 않는다
 assert.strictEqual(parseLimits({ five_hour: { utilization: 130 } })[0].remaining, 0);

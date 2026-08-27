@@ -1,6 +1,7 @@
 // main/tools.js
 // CDP 로 페이지를 조작한다. MCP 도 Electron 창 구조도 모른다.
-// webContents 하나만 받아서 순수 함수 묶음을 돌려준다.
+// 활성 탭의 webContents 를 돌려주는 함수 하나만 받는다 — 탭이 바뀌면 다음
+// 호출부터 새 탭에 붙는다. 어떤 탭이 활성인지는 여기서 정하지 않는다.
 
 // 에이전트가 상호작용할 수 있는 노드
 const INTERACTIVE = new Set([
@@ -17,27 +18,39 @@ const LANDMARK = new Set([
 
 const MAX_TEXT = 30000;
 
-async function createTools(webContents) {
+async function createTools(getWebContents) {
   // ponytail: CDP 도메인 enable 커맨드는 webContents 가 한 번도 navigate 한 적
   // 없으면(getURL() === '') 영원히 응답하지 않는다 (실측: Browser.getVersion 같은
   // 브라우저-레벨 커맨드는 즉시 응답하지만 DOM.enable 은 무한 대기, about:blank 를
   // 한 번 로드한 뒤에는 즉시 응답함 — Electron 44 / Chrome 152 CDP 세션이 프레임에
-  // 붙기 전이라 그런 것으로 보임). 실제 앱에서는 main/index.js 가 pageView 를
-  // about:blank 로 미리 로드해두므로 문제없지만, 방어적으로 한 번 더 확인한다.
-  if (!webContents.getURL()) {
-    await webContents.loadURL('about:blank');
+  // 붙기 전이라 그런 것으로 보임). 그래서 새로 연 탭도 about:blank 를 먼저 태운다.
+  async function setup(target) {
+    if (!target.getURL()) await target.loadURL('about:blank');
+    if (!target.debugger.isAttached()) target.debugger.attach('1.3');
+    await target.debugger.sendCommand('DOM.enable');
+    await target.debugger.sendCommand('Runtime.enable');
+    await target.debugger.sendCommand('Accessibility.enable');
   }
 
-  if (!webContents.debugger.isAttached()) {
-    webContents.debugger.attach('1.3');
+  // 탭마다 한 번만 붙인다. 플래그가 아니라 약속을 담아두는 이유는 경합 때문이다 —
+  // 플래그면 두 번째 호출이 enable 이 끝나기도 전에 "붙었다"고 보고 지나간다.
+  const ready = new WeakMap();
+  function wc() {
+    const target = getWebContents();
+    let p = ready.get(target);
+    if (!p) {
+      p = setup(target);
+      ready.set(target, p);
+    }
+    return p.then(() => target);
   }
-  const cdp = (method, params = {}) => webContents.debugger.sendCommand(method, params);
 
-  await cdp('DOM.enable');
-  await cdp('Runtime.enable');
-  await cdp('Accessibility.enable');
+  const cdp = async (method, params = {}) => (await wc()).debugger.sendCommand(method, params);
 
-  // ref -> backendDOMNodeId. snapshot() 마다 통째로 새로 만든다.
+  // 부팅 때 한 번 붙여둔다. 여기서 깨지면 도구가 아니라 부팅이 실패해야 한다.
+  await wc();
+
+  // ref -> {탭 id, backendDOMNodeId}. snapshot() 마다 통째로 새로 만든다.
   let refs = new Map();
   // ref 라벨 카운터. snapshot() 마다 0으로 리셋하면 이전 스냅샷의 라벨(예: e1)이
   // 새 문서에서도 그대로 재발급되어, 오래된 ref를 쥔 호출자가 완전히 다른(하지만
@@ -45,10 +58,13 @@ async function createTools(webContents) {
   let n = 0;
 
   async function resolve(ref) {
-    const backendNodeId = refs.get(ref);
-    if (backendNodeId === undefined) return null;
+    const hit = refs.get(ref);
+    if (!hit) return null;
+    // 다른 탭에서 뜬 스냅샷의 ref 다. backendNodeId 는 문서마다 따로 매겨지므로
+    // 그대로 쓰면 엉뚱한 노드를 잡는다.
+    if (hit.id !== (await wc()).id) return null;
     try {
-      const { object } = await cdp('DOM.resolveNode', { backendNodeId });
+      const { object } = await cdp('DOM.resolveNode', { backendNodeId: hit.backendNodeId });
       return object.objectId;
     } catch {
       return null; // 노드가 DOM 에서 사라졌다
@@ -64,11 +80,13 @@ async function createTools(webContents) {
   }
 
   async function navigate(url) {
-    await webContents.loadURL(url);
-    return `navigated to ${webContents.getURL()}`;
+    const target = await wc();
+    await target.loadURL(url);
+    return `navigated to ${target.getURL()}`;
   }
 
   async function snapshot() {
+    const target = await wc();
     const { nodes } = await cdp('Accessibility.getFullAXTree');
     refs = new Map();
     const lines = [];
@@ -82,7 +100,7 @@ async function createTools(webContents) {
       if (INTERACTIVE.has(role)) {
         if (node.backendDOMNodeId === undefined) continue;
         const ref = 'e' + ++n;
-        refs.set(ref, node.backendDOMNodeId);
+        refs.set(ref, { id: target.id, backendNodeId: node.backendDOMNodeId });
         // 이름 없는 상호작용 노드(아이콘 전용 버튼 등)도 버리지 않는다 — description
         // 으로 대체하고, 그마저 없으면 (unlabeled)로 표시해서 최소한 존재는 드러낸다.
         const description = (node.description?.value ?? '').trim();
@@ -98,7 +116,7 @@ async function createTools(webContents) {
     }
 
     if (!lines.length) return '(no interactive elements found; try read_page)';
-    return `${webContents.getURL()}\n${lines.join('\n')}`;
+    return `${target.getURL()}\n${lines.join('\n')}`;
   }
 
   // 요소의 화면 좌표 한 점을 고른다. 뷰포트 안으로 스크롤한 뒤 사각형을 다시 읽는다 —

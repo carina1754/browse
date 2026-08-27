@@ -1,0 +1,130 @@
+<!doctype html>
+<meta charset="utf-8" />
+<!-- chat.html 과 같은 정책. IPC 로만 말하고 원격 자원을 안 쓴다.
+     화면에 들어가는 문자열은 전부 textContent 로만 넣는다 (innerHTML 금지). -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'" />
+<title>status</title>
+<style>
+  /* 창 가로 전체를 쓰는 한 줄이다. 줄바꿈도 스크롤도 없다 — 높이가 바뀌면
+     위쪽 탭 내용이 통째로 튄다. */
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 11px system-ui, sans-serif; }
+  body {
+    display: flex; align-items: center; gap: 8px; padding: 0 8px;
+    background: #1e1e1e; color: #888; border-top: 1px solid #333;
+    white-space: nowrap; box-sizing: border-box;
+  }
+  button {
+    flex: 0 0 auto; background: none; border: 0; color: #888;
+    font: inherit; cursor: pointer; padding: 2px 4px; border-radius: 4px;
+  }
+  button:hover { color: #e0e0e0; background: #2f2f2f; }
+  #session { flex: 0 0 auto; }
+  #gap { flex: 1; min-width: 0; }
+  /* 이미지의 알약. 칩 여러 개를 가운뎃점으로 잇고 통째로 한 덩어리로 보인다. */
+  #limits {
+    flex: 0 1 auto; display: flex; align-items: center; gap: 6px;
+    background: #2b2b2b; border-radius: 6px; padding: 2px 4px 2px 8px;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .chip { color: #ccc; }
+  .dot { color: #555; }
+  .chip.hot { color: #e8a33d; }   /* 90% 넘게 썼다 */
+  .chip.dead { color: #ff6b6b; }  /* 다 썼다 */
+  #err { color: #777; }
+  #refresh.spin { animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<button id="gear" title="설정">⚙</button>
+<span id="session"></span>
+<span id="gap"></span>
+<div id="limits"></div>
+<script>
+  const sessionLabel = document.getElementById('session');
+  const limits = document.getElementById('limits');
+
+  document.getElementById('gear').onclick = () => window.api.openSettings().catch(() => {});
+
+  // --- 이번 세션이 태운 양 ---------------------------------------------------
+  // 에이전트가 다시 뜨면 대화가 초기화된다 ('modes' 가 재시작 신호다). 여기도 0.
+  let session = { tokens: 0, cost: 0 };
+
+  function short(n) {
+    if (n < 1000) return String(n);
+    if (n < 1000000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k';
+    return (n / 1000000).toFixed(1) + 'M';
+  }
+
+  function paintSession() {
+    sessionLabel.textContent = session.tokens
+      ? short(session.tokens) + ' · $' + session.cost.toFixed(session.cost >= 1 ? 2 : 3)
+      : '';
+  }
+
+  window.api.onEvent((evt) => {
+    if (evt.type === 'usage') {
+      const u = evt.usage || {};
+      // 캐시 읽기/쓰기도 토큰이다. 빼고 세면 실제로 태운 양보다 훨씬 작게 보인다.
+      session.tokens += (u.input_tokens || 0) + (u.output_tokens || 0)
+        + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+      session.cost += evt.cost || 0;
+      paintSession();
+    } else if (evt.type === 'modes') {
+      session = { tokens: 0, cost: 0 };
+      paintSession();
+    }
+  });
+
+  // --- 구독 한도 -------------------------------------------------------------
+  // 칩 문구는 main/account.js 가 만든다 ("3% 사용 4h 9m"). 여기서 다시 조립하지 않는다.
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+
+  function paintLimits(account) {
+    limits.replaceChildren();
+    const data = (account && account.limits) || {};
+    if (!data.limits || !data.limits.length) {
+      // 못 읽었으면 이유를 그대로 둔다. 빈 줄이면 한도가 없는 건지 앱이 멈춘
+      // 건지 구분이 안 된다.
+      limits.append(el('span', 'chip', data.error || '사용량 없음'));
+    } else {
+      data.limits.forEach((l, i) => {
+        if (i) limits.append(el('span', 'dot', '·'));
+        limits.append(el('span', 'chip' + (l.used >= 100 ? ' dead' : l.used >= 90 ? ' hot' : ''), l.text));
+      });
+    }
+    limits.append(refreshButton());
+  }
+
+  function refreshButton() {
+    const b = el('button', null, '↻');
+    b.id = 'refresh';
+    b.title = '사용량 새로고침';
+    b.onclick = () => refresh(true);
+    if (loading) b.classList.add('spin');
+    return b;
+  }
+
+  let loading = false;
+  async function refresh(force) {
+    if (loading) return;
+    loading = true;
+    const spin = document.getElementById('refresh');
+    if (spin) spin.classList.add('spin');
+    let account = null;
+    try {
+      account = await window.api.getAccount(force);
+    } catch (e) {
+      account = { limits: { error: e && e.message ? e.message : String(e) } };
+    }
+    loading = false;
+    paintLimits(account);
+  }
+
+  paintLimits(null);
+  refresh(false);
+</script>

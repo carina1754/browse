@@ -1,0 +1,112 @@
+<!doctype html>
+<meta charset="utf-8" />
+<!-- chat.html 과 같은 정책. IPC 로만 말한다.
+     img-src 만 열어둔다 — 파비콘은 남의 도메인에서 오는 이미지다. 스크립트도
+     스타일도 원격은 못 받는다.
+     탭 제목은 남의 웹사이트가 정하는 문자열이다 — 반드시 textContent 로만 넣는다. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data:" />
+<title>tabs</title>
+<style>
+  html, body { margin: 0; height: 100%; font: 12.5px system-ui, sans-serif; }
+  body {
+    display: flex; flex-direction: column;
+    background: #1b1b1d; color: #d0d0d2; border-right: 1px solid #2a2a2c;
+    box-sizing: border-box; overflow: hidden; user-select: none;
+  }
+  #list { flex: 1; overflow-y: auto; padding: 10px 8px 12px; }
+  #list::-webkit-scrollbar { width: 8px; }
+  #list::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+
+  .label {
+    padding: 10px 8px 4px; font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.04em; color: #6d6d70;
+  }
+  .label:first-child { padding-top: 2px; }
+
+  .row {
+    display: flex; align-items: center; gap: 8px;
+    height: 30px; padding: 0 6px 0 8px; margin-bottom: 1px;
+    border-radius: 8px; cursor: default; color: #a8a8ac; white-space: nowrap;
+  }
+  .row:hover { background: #262629; color: #e6e6e8; }
+  .row.active { background: #313135; color: #fff; }
+
+  /* 아이콘 자리는 파비콘이 있든 없든 같은 폭이라야 한다. 아니면 로딩되는
+     동안 제목이 좌우로 흔들린다. */
+  .icon {
+    flex: 0 0 16px; width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; line-height: 1;
+  }
+  .icon img { width: 16px; height: 16px; border-radius: 3px; }
+  .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+  .x {
+    flex: 0 0 auto; visibility: hidden; border: 0; background: none;
+    color: #8a8a8e; font: 14px/1 system-ui, sans-serif; cursor: pointer;
+    padding: 3px 5px; border-radius: 5px;
+  }
+  .row:hover .x { visibility: visible; }
+  .x:hover { background: #48484c; color: #fff; }
+
+  .row.new { color: #8a8a8e; }
+  .row.new .icon { font-size: 15px; }
+</style>
+<div id="list"></div>
+<script>
+  const list = document.getElementById('list');
+
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+
+  function iconFor(t) {
+    const box = el('div', 'icon');
+    if (!t.closable) { box.textContent = '💬'; return box; }
+    box.textContent = '🌐';
+    if (t.favicon) {
+      const img = document.createElement('img');
+      // 못 받으면 지구본으로 되돌린다. 깨진 이미지 아이콘이 뜨면 더 나쁘다.
+      img.onerror = () => { img.remove(); box.textContent = '🌐'; };
+      img.onload = () => { box.textContent = ''; box.append(img); };
+      img.src = t.favicon;
+    }
+    return box;
+  }
+
+  function tabRow(t) {
+    const row = el('div', 'row' + (t.active ? ' active' : ''));
+    row.title = t.url || t.title;
+    row.onclick = () => window.api.selectTab(t.id).catch(() => {});
+    row.append(iconFor(t), el('span', 'title', t.title || t.url || '새 탭'));
+
+    if (t.closable) {
+      const x = el('button', 'x', '×');
+      x.title = '탭 닫기';
+      x.onclick = (e) => {
+        e.stopPropagation(); // 닫기 버튼이 탭 선택까지 하면 안 된다
+        window.api.closeTab(t.id).catch(() => {});
+      };
+      row.append(x);
+    }
+    return row;
+  }
+
+  function render(tabs) {
+    const New = el('div', 'row new');
+    New.append(el('div', 'icon', '+'), el('span', 'title', '새 탭'));
+    New.onclick = () => window.api.newTab().catch(() => {});
+
+    const rows = [el('div', 'label', '탭'), New];
+    for (const t of tabs) rows.push(tabRow(t));
+    list.replaceChildren(...rows);
+  }
+
+  window.api.onTabs(render);
+  // 첫 그림. 이 창이 뜨기 전에 만들어진 탭은 이벤트를 놓쳤다.
+  window.api.listTabs().then(render).catch(() => render([]));
+</script>

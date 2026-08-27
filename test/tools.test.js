@@ -46,7 +46,9 @@ const FIXTURE_URL_B = 'data:text/html;charset=utf-8,' + encodeURIComponent(PAGE_
 async function main() {
   const win = new BrowserWindow({ show: false, width: 1000, height: 800 });
   const { createTools } = require('../main/tools.js');
-  const tools = await createTools(win.webContents);
+  // 도구는 "지금 활성인 탭"을 매번 물어본다. 탭 전환은 이 변수를 바꾸는 것이다.
+  let target = win.webContents;
+  const tools = await createTools(() => target);
 
   await tools.navigate(FIXTURE_URL);
 
@@ -117,6 +119,27 @@ async function main() {
     await tools.wait(0.2);
     const after = await tools.readPage();
     assert.ok(after.includes('RAW_MOUSEDOWN'), `click() did not fire a real mousedown:\n${after}`);
+  }
+
+  // --- 탭이 바뀌면 CDP 도 따라가고, 옛 탭의 ref 는 안 먹어야 한다 ---
+  {
+    const other = new BrowserWindow({ show: false, width: 1000, height: 800 });
+    const snapBefore = await tools.snapshot();
+    const refBefore = snapBefore.match(/[ref=(w+)]/)[1];
+
+    target = other.webContents; // 탭 전환
+    await tools.navigate(FIXTURE_URL);
+    const snapOther = await tools.snapshot();
+    assert.ok(snapOther.includes('Run Search'), `새 탭에 CDP 가 안 붙었다:
+${snapOther}`);
+
+    // 다른 탭에서 뜬 ref 다. backendNodeId 는 문서마다 따로라 그대로 쓰면 엉뚱한
+    // 노드를 잡는다 — 라벨이 우연히 겹치면 조용히 잘못된 요소를 누른다.
+    const crossTab = await tools.click(refBefore);
+    assert.match(crossTab, /stale ref/i, `다른 탭의 ref 가 살아 있다: ${crossTab}`);
+
+    target = win.webContents; // 원래 탭으로
+    other.destroy();
   }
 
   // --- Fix 2: every tool returns a string, never rejects, even on bad input ---
