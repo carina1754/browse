@@ -30,6 +30,7 @@
 <button id="fwd" title="앞으로">→</button>
 <button id="reload" title="새로고침">↻</button>
 <input id="url" placeholder="검색어 또는 URL 입력" spellcheck="false" />
+<button id="fill" title="저장된 비밀번호 채우기 (⚙ 비밀번호에서 관리)">🔑</button>
 <script>
   const url = document.getElementById('url');
   const back = document.getElementById('back');
@@ -39,6 +40,16 @@
   back.onclick = () => nav('back');
   fwd.onclick = () => nav('forward');
   document.getElementById('reload').onclick = () => nav('reload');
+
+  // 비밀번호 채우기. 비밀번호는 여기로 안 온다 — main 이 페이지에 직접 넣고
+  // 결과(ok/detail)만 돌아온다.
+  const fill = document.getElementById('fill');
+  fill.onclick = async () => {
+    const r = await window.api.fillPassword().catch((e) => ({ ok: false, detail: e.message }));
+    fill.textContent = r.ok ? '✓' : '✗';
+    fill.title = r.detail;
+    setTimeout(() => { fill.textContent = '🔑'; }, 1500);
+  };
 
   // 스킴이 있으면 그대로, 도메인처럼 생기면 https, 나머지는 구글 검색.
   // file:// 같은 건 여기서 만들어도 main/tabs.js 의 nav() 가 버린다.

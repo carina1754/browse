@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('api', {
   closeTab: (id) => ipcRenderer.invoke('tabs:close', id),
   newTab: () => ipcRenderer.invoke('tabs:new'),
   navTab: (action, url) => ipcRenderer.invoke('tabs:nav', action, url),
+  listVault: () => ipcRenderer.invoke('vault:list'),
+  addVault: (host, user, pass) => ipcRenderer.invoke('vault:add', host, user, pass),
+  removeVault: (host, user) => ipcRenderer.invoke('vault:remove', host, user),
+  fillPassword: () => ipcRenderer.invoke('vault:fill'),
   onTabs: (cb) => ipcRenderer.on('tabs:changed', (_e, list) => cb(list)),
 
   openSettings: () => ipcRenderer.invoke('settings:open'),

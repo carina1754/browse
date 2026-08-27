@@ -132,7 +132,7 @@ app.whenReady().then(async () => {
   await new Promise((r) => s1.webContents.once('did-finish-load', r));
   await wait(300);
   const text = await s1.webContents.executeJavaScript('document.body.innerText');
-  for (const want of ['계정', '설정을 못 읽었다']) {
+  for (const want of ['계정', '비밀번호', '사이트', '설정을 못 읽었다']) {
     assert.ok(text.includes(want), `설정 창에 "${want}" 칸이 없다: ${text.slice(0, 120)}`);
   }
   s1.destroy();

@@ -21,6 +21,10 @@
   .row button.ghost { background: #3a3a3a; }
   .warn { color: #b58900; font-size: 11px; padding-top: 8px; border-top: 1px solid #333; margin-top: 10px; }
   .err { color: #ff6b6b; font-size: 11px; padding-top: 6px; }
+  .row input:not([type=checkbox]) {
+    flex: 1; min-width: 0; background: #2b2b2b; border: 1px solid #3a3a3a;
+    color: #e0e0e0; border-radius: 3px; padding: 3px 6px; font: inherit;
+  }
 </style>
 <main id="panel">불러오는 중…</main>
 <script>
@@ -30,6 +34,8 @@
   let account = null;
   let loginNote = '';
   let error = '';
+  let vaultRows = [];
+  let vaultNote = '';
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -59,6 +65,7 @@
   function render() {
     panel.replaceChildren();
     accountSection();
+    vaultSection();
     if (!settings) {
       // 여기서 error 를 안 찍으면 설정을 못 읽었을 때 "불러오는 중…" 으로 영원히 굳는다.
       panel.append(el('div', error ? 'err' : 'why', error || '설정 불러오는 중…'));
@@ -151,6 +158,50 @@
     if (loginNote) panel.append(el('div', 'why', loginNote));
   }
 
+  // --- 비밀번호 ---------------------------------------------------------------
+  // 비밀번호는 이 창으로 절대 안 돌아온다. 저장(add)은 사용자가 방금 친 값을
+  // main 으로 보내는 한 방향이고, 목록(list)에는 host/user 만 온다.
+
+  async function reloadVault() {
+    vaultRows = await window.api.listVault().catch(() => vaultRows);
+    render();
+  }
+
+  function vaultSection() {
+    panel.append(el('h2', null, '비밀번호'));
+    for (const r of vaultRows) {
+      const row = el('div', 'row');
+      row.append(el('label', null, r.host + ' · ' + r.user));
+      row.append(button('삭제', 'ghost', async () => {
+        lock();
+        await window.api.removeVault(r.host, r.user).catch(() => {});
+        vaultNote = '';
+        await reloadVault();
+      }));
+      panel.append(row);
+    }
+
+    const row = el('div', 'row');
+    const mk = (ph) => { const i = el('input'); i.placeholder = ph; return i; };
+    const host = mk('사이트 (예: google.com)');
+    const user = mk('아이디');
+    const pass = mk('비밀번호');
+    pass.type = 'password';
+    row.append(host, user, pass, button('저장', null, async () => {
+      lock();
+      const res = await window.api.addVault(host.value, user.value, pass.value)
+        .catch((e) => ({ ok: false, detail: e && e.message ? e.message : String(e) }));
+      vaultNote = res.ok ? res.detail : '저장 실패: ' + res.detail;
+      await reloadVault();
+    }));
+    panel.append(row);
+
+    panel.append(el('div', 'why',
+      'OS 계정 키(DPAPI)로 암호화해서 이 PC 에만 저장한다. 채우기는 주소창 옆 🔑 — '
+      + '호스트가 맞는 사이트에서만 된다. 비밀번호는 AI 에이전트에게 안 보인다.'));
+    if (vaultNote) panel.append(el('div', vaultNote.startsWith('저장 실패') ? 'err' : 'why', vaultNote));
+  }
+
   async function refresh(force) {
     try {
       account = await window.api.getAccount(force);
@@ -221,6 +272,7 @@
     } catch (e) {
       error = '설정을 못 읽었다: ' + (e && e.message ? e.message : e);
     }
+    vaultRows = await window.api.listVault().catch(() => []);
     render();
     // 계정은 프로세스를 띄우고 네트워크를 친다. 설정 화면을 먼저 그리고 뒤따라 채운다.
     refresh(false);

@@ -4,7 +4,7 @@
 // test/shell.test.js can require it without booting the app.
 const path = require('node:path');
 const fs = require('node:fs');
-const { app, ipcMain } = require('electron');
+const { app, ipcMain, safeStorage } = require('electron');
 const { createWindow, openSettingsWindow } = require('./index.js');
 const { createTools } = require('./tools.js');
 const { startMcpServer } = require('./mcp.js');
@@ -12,6 +12,7 @@ const { createAgent } = require('./claude.js');
 const { clearDir } = require('./workspace.js');
 const { checkAll, install, claudeBin } = require('./deps.js');
 const { authStatus, logout, openLogin, subscriptionUsage } = require('./account.js');
+const { createVault, fillScript } = require('./vault.js');
 const {
   loadSettings, saveSettings, buildSystemPrompt, buildEnv, enabled,
   isHeadroomUp, headroomUrl,
@@ -215,6 +216,33 @@ app.whenReady().then(async () => {
     return true;
   });
   ipcMain.handle('tabs:nav', (_e, action, url) => { tabs.nav(action, url); return true; });
+
+  // 사이트 비밀번호 금고. 암호화는 OS(DPAPI). 평문은 main 밖으로 안 나간다 —
+  // 렌더러는 host/user 목록만 보고, 채우기는 main 이 페이지에 직접 주입한다.
+  const vault = createVault({
+    file: path.join(app.getPath('userData'), 'vault.json'),
+    crypt: {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
+      decrypt: (b) => safeStorage.decryptString(Buffer.from(b, 'base64')),
+    },
+  });
+  ipcMain.handle('vault:list', () => vault.list());
+  ipcMain.handle('vault:add', (_e, host, user, pass) => vault.add(host, user, pass));
+  ipcMain.handle('vault:remove', (_e, host, user) => vault.remove(host, user));
+  ipcMain.handle('vault:fill', async () => {
+    const wc = tabs.activePage();
+    if (!wc) return { ok: false, detail: '페이지 탭에서만 채울 수 있다' };
+    const creds = vault.credsFor(wc.getURL());
+    if (!creds) return { ok: false, detail: '이 사이트에 저장된 계정이 없다 — ⚙ 비밀번호에서 추가해라' };
+    try {
+      const r = await wc.executeJavaScript(fillScript(creds), true);
+      if (r === 'no-fields') return { ok: false, detail: '로그인 입력칸을 못 찾았다' };
+      return { ok: true, detail: '채웠다 (' + r + ')' };
+    } catch (e) {
+      return { ok: false, detail: '주입 실패: ' + e.message };
+    }
+  });
 
   ipcMain.handle('settings:open', () => {
     openSettingsWindow(win);

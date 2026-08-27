@@ -2,7 +2,7 @@
 // 탭 목록과 각 탭의 뷰. 어떤 탭이 보이는지도 여기서 정한다.
 // 배치(bounds)는 여기서 안 한다 — main/index.js 의 layout() 이 창 크기를 안다.
 // 첫 번째 탭은 AI 대화 탭이고 닫을 수 없다. 나머지는 진짜 웹 페이지다.
-const { WebContentsView } = require('electron');
+const { WebContentsView, app } = require('electron');
 
 const CHAT_ID = 'chat';
 const BLANK = 'about:blank';
@@ -55,6 +55,11 @@ function createTabs({ win, chatView, onChange, onLayout }) {
     view.setVisible(false);
 
     const wc = view.webContents;
+    // 구글은 Electron UA 로 들어온 로그인을 "안전하지 않은 브라우저"라며 막는다.
+    // 크롬처럼 보이도록 Electron/앱 토큰만 뗀다.
+    const appTag = app.getName() + '/';
+    wc.setUserAgent(wc.getUserAgent().split(' ')
+      .filter((t) => !t.startsWith('Electron/') && !t.startsWith(appTag)).join(' '));
     wc.on('page-title-updated', (_e, title) => { tab.title = title; changed(); });
     wc.on('page-favicon-updated', (_e, icons) => { tab.favicon = icons[0] || ''; changed(); });
     const moved = () => { tab.url = wc.getURL(); changed(); };
@@ -100,6 +105,13 @@ function createTabs({ win, chatView, onChange, onLayout }) {
     else if (action === 'go' && httpish(url)) wc.loadURL(url).catch(() => {});
   }
 
+  // 지금 화면에 보이는 페이지 탭. 대화 탭이 활성이면 null — 비밀번호 채우기는
+  // 사용자가 보고 있는 페이지에만 한다.
+  function activePage() {
+    const t = find(activeId);
+    return t && t.id !== CHAT_ID ? t.view.webContents : null;
+  }
+
   // 에이전트용 페이지. 부팅 직후엔 대화 탭밖에 없으므로 여기서 하나 만든다.
   // 화면은 안 바꾼다 — 사용자가 대화창을 보고 있는데 탭이 튀면 안 된다.
   function pageContents() {
@@ -113,6 +125,7 @@ function createTabs({ win, chatView, onChange, onLayout }) {
     close,
     select,
     nav,
+    activePage,
     pageContents,
     views: () => tabs.map((t) => t.view),
     CHAT_ID,

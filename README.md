@@ -78,6 +78,13 @@ renderer/toolbar.html)이 뜨고, 대화 탭에서는 숨는다. 새 탭은 `abo
 주소창 입력과 `window.open` URL 은 main 의 같은 스킴 검사(http/https 만, 대소문자
 무시)를 거친다 — 페이지가 file:// 을 숨은 탭에 열고 에이전트 도구가 그 로컬 파일을
 읽는 체인을 막는다.
+- **페이지 탭 UA 에서 Electron/앱 토큰을 뗀다.** 구글이 Electron UA 의 로그인을
+  "안전하지 않은 브라우저"로 거절한다. 쿠키는 기본 세션이라 디스크에 남는다 —
+  한 번 로그인하면 재시작해도 유지된다.
+- **비밀번호 금고.** ⚙ 비밀번호에서 저장(DPAPI 암호화, vault.json), 주소창 옆 🔑 로
+  채우기. 평문은 main 프로세스 안에서만 산다 — 렌더러는 host/user 목록만 받고,
+  채우기는 main 이 활성 페이지 탭에 직접 주입한다. 호스트가 맞을 때만 (서브도메인
+  허용, 점 경계 검사). 에이전트 MCP 도구에는 금고 접근이 없다.
 
 - **맨 위 "AI 대화" 탭은 닫을 수 없다.** 이 탭이 사라지면 앱과 말할 방법이 없다.
 - **`window.open` / `target=_blank` 은 새 탭이 된다.** 핸들러에서 `deny` 를 안 하면
@@ -119,6 +126,7 @@ renderer/toolbar.html)이 뜨고, 대화 탭에서는 숨는다. 새 탭은 `abo
 main/app.js      Electron 진입점 (package.json "main"). 부팅 순서와 모든 IPC 핸들러.
 main/index.js    createWindow() 만 있는 부작용 없는 모듈. 창 크기 변화를 모든 뷰에 옮긴다.
 main/tabs.js     탭 목록·열기·닫기·전환. 어느 탭이 보이고 에이전트가 어느 탭을 쓰는지.
+main/vault.js    사이트 비밀번호 금고 (safeStorage/DPAPI 암호화, 호스트 매칭, 주입 스크립트).
 main/claude.js   claude.exe spawn, argv 조립, NDJSON 스트림 파싱, BLOCKED_TOOLS.
 main/tools.js    CDP 브라우저 도구 6개. MCP 도 Electron 창 구조도 모른다.
 main/mcp.js      도구 6개를 MCP 툴로 등록하고 localhost HTTP 로 노출. CDP 를 모른다.
@@ -130,7 +138,7 @@ main/preload.js  contextBridge 로 window.api 노출.
 renderer/chat.html  채팅 UI 만. innerHTML 안 쓴다 — 전부 textContent.
 renderer/tabs.html  왼쪽 탭 줄. 제목·파비콘은 남의 사이트가 정한다 — textContent, img-src 만 열어둠.
 renderer/status.html 맨 아래 상태 줄 — ⚙, 이번 세션이 태운 토큰·비용, 구독 한도 칩, 새로고침(↻).
-renderer/toolbar.html 페이지 탭 위 도구 줄 — 뒤/앞/새로고침/주소창. URL 검증은 main 이 한다.
+renderer/toolbar.html 페이지 탭 위 도구 줄 — 뒤/앞/새로고침/주소창/🔑. URL 검증도 비밀번호도 main 이 쥔다.
 renderer/settings.html 설정 창 — 계정(로그아웃/로그인)과 토큰 절약. 같은 preload, 같은 CSP, 같은 textContent 규칙.
 test/            아래 테스트 절 참고
 spike/           동결된 게이트 산출물. import 하지도 고치지도 말 것.

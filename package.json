@@ -7,7 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "node test/deps.test.js && node test/modes.test.js && node test/workspace.test.js && node test/account.test.js && electron test/shell.test.js && electron test/tools.test.js && node test/agent.test.js && node test/security.test.js",
+    "test": "node test/deps.test.js && node test/modes.test.js && node test/workspace.test.js && node test/account.test.js && node test/vault.test.js && electron test/shell.test.js && electron test/tools.test.js && node test/agent.test.js && node test/security.test.js",
     "start": "electron .",
     "test:shell": "electron test/shell.test.js",
     "test:agent": "node test/agent.test.js",
@@ -17,7 +17,8 @@
     "test:workspace": "node test/workspace.test.js",
     "test:account": "node test/account.test.js",
     "test:security": "node test/security.test.js",
-    "test:free": "node test/deps.test.js && node test/modes.test.js && node test/workspace.test.js && node test/account.test.js && electron test/shell.test.js && electron test/tools.test.js"
+    "test:free": "node test/deps.test.js && node test/modes.test.js && node test/workspace.test.js && node test/account.test.js && node test/vault.test.js && electron test/shell.test.js && electron test/tools.test.js",
+    "test:vault": "node test/vault.test.js"
   },
   "repository": {
     "type": "git",
